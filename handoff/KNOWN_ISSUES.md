@@ -2,10 +2,9 @@
 
 ## Bugs
 
-- Pagination may still fail after page 1 even after narrowing the selector to `button.btn-next[aria-label="Next page"]`
-- `currentPageNumber()` depends on page text parsing and often returns `null`
+- `currentPageNumber()`-style page inference is still weak and may return `null` in some Zoom DOM states
 - Generated script download extension handling has historically been inconsistent (`.sh` sometimes arriving as `.txt`)
-- `Generate rename kit` only makes sense after a successful save-all run; failure modes are still somewhat opaque
+- Rename-kit generation depends on correctly observing browser downloads; if observation fails, it fails closed
 
 ## Flaky behavior
 

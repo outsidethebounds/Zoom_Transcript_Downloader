@@ -19,7 +19,7 @@ Chrome extension for Zoom transcript pages that:
 ## Core features
 
 - Injected panel on `zoom.us/recording/meeting/transcript*`
-- `Save all available` across paginated transcript listings
+- `Save all available` across paginated transcript listings, including successful tested runs from non-first pages
 - Automatic run reset before each save-all
 - OS auto-default based on install platform
 - Configurable filename pattern

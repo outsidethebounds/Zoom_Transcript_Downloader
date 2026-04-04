@@ -1,15 +1,14 @@
 # ACTIVE_PRIORITIES
 
-## 1. Make pagination truly reliable
-- **Why it matters:** bulk download is the core value proposition; if it stops at page 1, the product is not doing the main job
-- **Suggested starting files:** `content.js`
-- **Relevant functions:** `findNextPageButton()`, `gotoNextPage()`, `Save all available` loop
-- **Risks / dependencies:** tightly coupled to Zoom DOM; changes may need fresh DOM inspection
+## 1. Add lightweight automated tests for the logic that is now working
+- **Why it matters:** the core runtime path has finally been validated manually; now it needs regression protection
+- **Suggested starting files:** `content.js`, new test files/helpers
+- **Risks / dependencies:** current file structure is not test-friendly and may need helper extraction first
 
-## 2. Make rename matching less brittle
-- **Why it matters:** current generated scripts assume downloaded file order matches tracked manifest order
-- **Suggested starting files:** `content.js`, `ARCHITECTURE.md`, `DECISIONS.md`
-- **Risks / dependencies:** browser-managed download naming/order may limit what is possible without changing architecture again
+## 2. Reduce maintenance risk in `content.js`
+- **Why it matters:** the current file is still large, stateful, and easy to break accidentally
+- **Suggested starting files:** `content.js`, `ARCHITECTURE.md`
+- **Risks / dependencies:** refactor must preserve current working behavior with minimal user-facing changes
 
 ## 3. Verify generated script extensions and download UX on both OSes
 - **Why it matters:** users already hit cases where `.sh` arrived as `.txt`

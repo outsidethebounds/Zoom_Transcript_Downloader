@@ -15,6 +15,7 @@ let saveAllController = { running: false, stopRequested: false };
 let downloadManifest = [];
 let rescanTimer = null;
 let currentRunId = null;
+let stickyPanelMessage = null;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -102,12 +103,28 @@ function applyCollisionSafeFilenames(entries, settings) {
   });
 }
 
+function isEnabledDownloadButton(button) {
+  if (!button) return false;
+  if (button.disabled) return false;
+  if (button.getAttribute('aria-disabled') === 'true') return false;
+  if ((button.className || '').includes('is-secondary-disabled')) return false;
+  return true;
+}
+
 function collectRows() {
   const rows = [...document.querySelectorAll(ROW_SELECTOR)].map((row, index) => {
     const button = row.querySelector(DOWNLOAD_BUTTON_SELECTOR);
     const text = (row.innerText || '').trim();
     const meta = parseRowText(text);
-    return { index, key: row.getAttribute('data-key') || '', text, meta, hasDownload: !!button, button, row };
+    return {
+      index,
+      key: row.getAttribute('data-key') || '',
+      text,
+      meta,
+      hasDownload: isEnabledDownloadButton(button),
+      button,
+      row,
+    };
   }).filter(r => r.hasDownload && r.meta);
   lastRows = rows;
   return rows;
@@ -222,6 +239,10 @@ function setSaveAllRunning(isRunning) {
 function updatePanelSummary() {
   const out = document.getElementById('ztd-output');
   if (!out || !currentSettings) return;
+  if (stickyPanelMessage) {
+    out.textContent = typeof stickyPanelMessage === 'string' ? stickyPanelMessage : JSON.stringify(stickyPanelMessage, null, 2);
+    return;
+  }
   const pagination = getPaginationState();
   out.textContent = JSON.stringify({
     url: location.href,
@@ -371,8 +392,9 @@ async function populateSettingsModal() {
 
 async function triggerZoomDownload(item, settings) {
   const marker = await getLatestDownloadId();
+  log('Waiting for observed browser download', { afterId: marker?.maxId || 0, title: item.meta.title });
   item.button.click();
-  const observed = await waitForObservedDownload({ afterId: marker?.maxId || 0, timeoutMs: 15000 });
+  const observed = await waitForObservedDownload({ afterId: marker?.maxId || 0, timeoutMs: 20000 });
   const normalized = normalizeMeta(item.meta);
   const entry = {
     runId: currentRunId,
@@ -391,6 +413,7 @@ async function triggerZoomDownload(item, settings) {
   updatePanelSummary();
   log('Triggered Zoom browser download', entry);
   if (!entry.sourceFilename) {
+    log('Failed to observe browser download for transcript', { title: entry.title, meetingId: entry.meetingId, page: entry.page });
     return { ok: false, error: 'Could not observe the downloaded file in the browser. Rename kit would be unreliable.', entry };
   }
   return { ok: true, browserDownloadTriggered: true, sourceFilename: entry.sourceFilename, targetBase: entry.targetBase };
@@ -408,7 +431,11 @@ async function gotoFirstPage() {
     seen.add(key);
     if (state.currentPage === 1) return { ok: true, page: 1 };
     if (!state.canGoPrev) {
-      if (steps === 0) return { ok: true, page: state.currentPage || null };
+      const rowsNow = collectRows();
+      if (rowsNow.length) {
+        log('Assuming page 1 because previous-page control is disabled', { currentPage: state.currentPage, rows: rowsNow.length });
+        return { ok: true, page: state.currentPage || 1 };
+      }
       return { ok: false, error: 'Could not continue navigating back to page 1.' };
     }
     log('Resetting to page 1', { currentPage: state.currentPage, totalPages: state.totalPages });
@@ -468,11 +495,16 @@ function generatePowerShellScript(entries) {
 
 async function generateRenameKit() {
   const settings = await getSettings();
+  log('Generate rename kit clicked', { tracked: downloadManifest.length, runId: currentRunId });
   if (!downloadManifest.length) {
     return { ok: false, error: 'No downloaded transcript entries have been tracked yet. Use Save all available first.' };
   }
   if (downloadManifest.some(entry => !entry.sourceFilename)) {
-    return { ok: false, error: 'At least one downloaded file could not be matched to an observed browser download. Refusing to generate an unreliable rename kit.' };
+    return {
+      ok: false,
+      error: 'At least one downloaded file could not be matched to an observed browser download. Refusing to generate an unreliable rename kit.',
+      unmatched: downloadManifest.filter(entry => !entry.sourceFilename).map(entry => ({ title: entry.title, meetingId: entry.meetingId, page: entry.page }))
+    };
   }
 
   const finalizedEntries = applyCollisionSafeFilenames(downloadManifest, settings);
@@ -551,17 +583,26 @@ function renderPanel(rows, settings) {
     panel.querySelector('#ztd-debug-toggle').addEventListener('change', applyDebugVisibility);
 
     panel.querySelector('#ztd-generate-kit-main').addEventListener('click', async () => {
-      const result = await generateRenameKit();
-      panel.querySelector('#ztd-output').textContent = JSON.stringify(result.ok ? {
-        message: 'Rename kit generated.',
-        instructions: result.instructions,
-        entries: result.entries,
-        manifestDownload: result.manifestResult,
-        scriptDownload: result.scriptResult
-      } : result, null, 2);
+      stickyPanelMessage = 'Generating rename kit...';
+      panel.querySelector('#ztd-output').textContent = stickyPanelMessage;
+      try {
+        const result = await generateRenameKit();
+        stickyPanelMessage = result.ok ? {
+          message: 'Rename kit generated.',
+          instructions: result.instructions,
+          entries: result.entries,
+          manifestDownload: result.manifestResult,
+          scriptDownload: result.scriptResult
+        } : result;
+        panel.querySelector('#ztd-output').textContent = JSON.stringify(stickyPanelMessage, null, 2);
+      } catch (error) {
+        stickyPanelMessage = { ok: false, error: String(error?.message || error) };
+        panel.querySelector('#ztd-output').textContent = JSON.stringify(stickyPanelMessage, null, 2);
+      }
     });
 
     panel.querySelector('#ztd-save-all').addEventListener('click', async () => {
+      stickyPanelMessage = null;
       const settingsNow = await getSettings();
       currentRunId = `run-${Date.now()}`;
       downloadManifest = [];
@@ -571,16 +612,23 @@ function renderPanel(rows, settings) {
       const results = [];
       let pagesVisited = 0;
       try {
+        panel.querySelector('#ztd-output').textContent = 'Resetting to page 1 before download...';
         const reset = await gotoFirstPage();
         if (!reset.ok) {
           panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: reset.error, action: 'Aborted before download because page-1 reset failed.' }, null, 2);
           return;
         }
 
+        await sleep(800);
+        scheduleRescan();
         const visitedSignatures = new Set();
         while (true) {
           const rowsNow = collectRows();
           const signature = rowSignature(rowsNow);
+          if (!rowsNow.length) {
+            panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: 'No transcript rows were found after page reset/navigation.', page: getPaginationState().currentPage }, null, 2);
+            return;
+          }
           if (visitedSignatures.has(signature)) {
             panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: 'Detected duplicate page signature during pagination. Aborting to avoid looping.', pagesVisited, downloaded: downloadManifest.length }, null, 2);
             return;

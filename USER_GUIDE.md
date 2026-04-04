@@ -1,6 +1,6 @@
 # Zoom Transcript Downloader — User Guide
 
-Version: 1.4.1
+Version: 1.4.4
 
 ## What this extension does
 

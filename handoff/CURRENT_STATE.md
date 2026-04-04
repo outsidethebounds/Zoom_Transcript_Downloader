@@ -7,16 +7,20 @@
 - Target OS defaults from current platform
 - Filename pattern is configurable
 - Meeting ID can be toggled on explicitly
-- Save-all flow now attempts to reset to page 1 first
+- Save-all flow resets to page 1 before downloading
+- Multi-page `Save all available` has now been manually tested successfully in this session
+- Starting from a non-first transcript page has been manually tested successfully in this session
+- Disabled / greyed-out download rows are skipped correctly
 - Browser downloads are observed in the background service worker
 - Rename kit now uses captured source filenames instead of pure timestamp/order matching
+- Generate rename kit has been manually tested successfully after multi-page runs in this session
 - Repo and handoff docs are pushed to GitHub
 
 ## What is partially implemented
 
-- Pagination is significantly improved but still needs real-world proof on multi-page Zoom accounts
 - Page-number detection still depends partly on DOM heuristics
-- Script extension handling should still be validated on both macOS and Windows in live browsers
+- Script extension handling should still be validated again on both macOS and Windows after future changes
+- The current architecture works, but `content.js` is still too large
 
 ## What is broken or risky
 
@@ -30,14 +34,15 @@
 Most recent work completed:
 - moved from order-based renaming to exact-source-filename renaming
 - added page-1 reset requirement into save-all flow
-- updated docs toward the GA target the user defined
+- fixed disabled/greyed-out download button handling
+- validated the major runtime flow with successful manual tests
 
 ## Best next place to resume
 
-1. live-test `Save all available` on a real multi-page Zoom account
-2. verify page-1 reset behavior
-3. verify rename kit on both macOS and Windows using clean folders
-4. only then decide whether additional refactor is needed
+1. preserve and stabilize the current working behavior
+2. remove legacy/dead files only after confirming they are truly unused
+3. add lightweight automated tests around parsing, collision logic, and script generation
+4. consider splitting `content.js` once behavior is stable enough not to regress
 
 ## Files/modules most relevant now
 

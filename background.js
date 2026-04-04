@@ -49,11 +49,16 @@ chrome.downloads.onChanged.addListener(delta => {
   }
 });
 
-async function waitForObservedDownload({ afterId = 0, timeoutMs = 15000 }) {
+async function waitForObservedDownload({ afterId = 0, timeoutMs = 20000 }) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const next = observedDownloads.find(d => d.id > afterId && !/zoom-transcript-manifest|rename_zoom_transcripts/i.test(d.basename));
-    if (next) return next;
+    const candidates = observedDownloads
+      .filter(d => d.id > afterId && !/zoom-transcript-manifest|rename_zoom_transcripts/i.test(d.basename))
+      .sort((a, b) => a.id - b.id);
+    const completed = candidates.find(d => d.state === 'complete' && d.basename);
+    if (completed) return completed;
+    const fallback = candidates.find(d => d.basename);
+    if (Date.now() - started > 4000 && fallback) return fallback;
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   return null;

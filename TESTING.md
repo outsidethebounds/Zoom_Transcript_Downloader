@@ -30,6 +30,8 @@ Must verify all of these:
 - run starts by trying to return to page 1
 - if page-1 reset fails, run aborts clearly
 - pagination advances beyond first page when more pages exist
+- starting from a later page still results in a full run
+- disabled / greyed-out transcript rows are skipped
 - stop button works
 - manifest resets between runs
 
