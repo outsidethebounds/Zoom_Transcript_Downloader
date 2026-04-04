@@ -1,290 +1,124 @@
 # Zoom Transcript Downloader — User Guide
 
-Version: 1.3.4
-
-This guide explains how to install and use the Zoom Transcript Downloader Chrome extension from start to finish.
+Version: 1.4.1
 
 ## What this extension does
 
-The extension helps you:
-- open the Zoom transcript recordings page
-- download all available transcript files from Zoom
-- generate a rename kit so the downloaded transcript files can be renamed into clean, consistent filenames
+This extension helps you:
+- download all Zoom transcript files across all available transcript pages
+- generate a rename kit that renames those files into clean filenames
 
-The extension does **not** rename files directly inside Chrome.
-Instead, it generates:
-- a **manifest JSON** file
-- a **rename script** for either macOS or Windows
+The rename kit contains:
+- a manifest JSON file
+- a script for macOS or Windows
 
-You then run the script in the folder where the transcript `.txt` files were downloaded.
+## Important rule before you start
 
----
+Use a **clean folder** for transcript downloads.
 
-## Extension location
+That means the folder where Zoom is downloading these transcript `.txt` files should not also contain unrelated `.txt` files.
 
-On this Mac, the extension source folder is here:
+## Install the extension
 
-`/Users/macmini/.openclaw/workspace/tools/zoom-transcript-extension`
-
-If you want to use it on another machine, copy that entire folder to the other machine.
-
----
-
-## Installing the extension in Chrome
-
-### On macOS or Windows
-
-1. Open Chrome
-2. Go to:
-   `chrome://extensions`
+1. Open Chrome or Edge
+2. Go to `chrome://extensions`
 3. Turn on **Developer mode**
 4. Click **Load unpacked**
 5. Select the `zoom-transcript-extension` folder
 
-After loading it, Chrome should show the extension and its current version.
-
-If you update the extension files later:
+If you update the extension later:
 1. go back to `chrome://extensions`
-2. click **Reload** on the extension
+2. click **Reload**
 3. refresh the Zoom transcript page
 
----
+## Open the extension
 
-## Opening the extension
+1. Open the Zoom transcript page
+2. Click the extension icon
 
-1. Go to the Zoom transcript page
-2. Click the extension icon in Chrome
+## Main workflow
 
-The extension panel should appear on the page.
+### 1. Download all transcripts
+Click **Save all available**.
 
----
+The extension should:
+- reset to page 1 first
+- download transcript files from all available pages
+- stop with a clear error if page-1 reset fails
 
-## What the main buttons do
+### 2. Generate the rename kit
+After downloads finish, click **Generate rename kit**.
 
-### Save all available
-Downloads transcript files from all available Zoom transcript pages, not just the current visible page.
-
-If Zoom shows multiple pages of transcripts, the extension should:
-- download the items on the current page
-- move to the next page
-- continue until all pages are processed
-
-### Generate rename kit
-Downloads two files:
+This downloads:
 - a manifest JSON file
 - a rename script
 
-You use these **after** downloading transcripts.
-
-### Stop
-Stops a running **Save all available** process.
-
-It will stop after the current in-progress download trigger.
-
-### Settings (gear icon)
-Opens the Settings window, where you can configure:
-- filename pattern
-- target OS (`macOS` or `Windows`)
-
-The extension should auto-select the correct target OS based on the machine where it was installed, but you can change it manually.
-
----
-
-## Recommended workflow
-
-### Step 1 — Open the Zoom transcript page
-Open the Zoom page that lists transcript recordings.
-
-### Step 2 — Open the extension panel
-Click the extension icon in Chrome.
-
-### Step 3 — Check the transcript count
-The panel should show how many transcript rows are visible, and often the total count if Zoom exposes it.
-
-### Step 4 — Download transcripts
-Click:
-- **Save all available**
-
-This triggers the Zoom transcript downloads.
-
-### Step 5 — Generate the rename kit
-After the downloads finish, click:
-- **Generate rename kit**
-
-This should download:
-- a manifest JSON file
-- a rename script (`.sh` on macOS or `.ps1` on Windows)
-
-### Step 6 — Go to the download folder
-Open the folder where Zoom saved the transcript `.txt` files.
-
-### Step 7 — Run the rename script
-Run the script in that same folder.
-
----
+### 3. Run the script in the download folder
+Run the script in the same folder where the transcript `.txt` files were downloaded.
 
 ## Settings
 
-### Filename pattern
-The filename pattern controls how transcript files should be renamed.
+Open the gear icon to set:
+- **Filename pattern**
+- **Target OS**
+- whether to include **meeting ID** in every filename
 
-Supported tokens:
-- `{date}` → meeting date in `YYYY-MM-DD`
-- `{time}` → meeting time in `HHMM`
-- `{title}` → sanitized meeting title
-- `{meetingId}` → Zoom meeting ID
+### Default filename format
+Default:
 
-### Example patterns
-- `{date} - {time} - {title}`
-- `{date} - {title}`
-- `{date} - {time} - {title} - {meetingId}`
+`{date} - {time} - {title}`
 
-### Example output
-A file might become:
+Example:
 
 `2026-04-04 - 0930 - Weekly Sync.txt`
 
-### Target OS
-Choose the system where you plan to run the rename script:
-- `macOS`
-- `Windows`
+### Optional meeting ID
+Meeting ID is **not** included by default.
 
-This determines which script type the extension generates.
-
----
-
-## Files generated by “Generate rename kit”
-
-### 1. Manifest JSON
-This file records:
-- the meetings processed
-- the filenames the extension expects
-- metadata such as title, date, time, and meeting ID
-
-You do **not** execute the JSON file.
-It is mainly for:
-- debugging
-- reference
-- auditing what the extension generated
-
-### 2. Rename script
-This is the file you actually run to rename the transcript files.
-
-Depending on the chosen OS, it will be:
-- `rename_zoom_transcripts.sh` for macOS
-- `rename_zoom_transcripts.ps1` for Windows
-
----
+It can still be used automatically when two files would otherwise collide.
 
 ## Running the rename script
 
-## macOS
-If you generated a macOS rename script:
-
-1. Open Terminal
-2. Change into the download folder:
-
+### macOS
 ```bash
 cd /path/to/download/folder
-```
-
-3. Make the script executable:
-
-```bash
 chmod +x rename_zoom_transcripts.sh
-```
-
-4. Run it:
-
-```bash
 ./rename_zoom_transcripts.sh
 ```
 
-If the script downloaded with the wrong extension for some reason, rename it back to:
-
-`rename_zoom_transcripts.sh`
-
-before running it.
-
----
-
-## Windows
-If you generated a Windows rename script:
-
-1. Open PowerShell
-2. Change into the download folder:
-
+### Windows / Edge / Chrome
 ```powershell
 cd C:\path\to\download\folder
-```
-
-3. Run:
-
-```powershell
 powershell -ExecutionPolicy Bypass -File .\rename_zoom_transcripts.ps1
 ```
 
-This avoids the normal PowerShell execution-policy block.
+## What the JSON file is for
 
----
+The JSON manifest is not something you run.
 
-## Important usage notes
-
-### Run the script in the correct folder
-Run the script in the same folder that contains the downloaded Zoom transcript `.txt` files.
-
-### Don’t mix unrelated `.txt` files into that folder
-The generated rename scripts assume the relevant Zoom transcript files are the files being renamed.
-If the folder contains lots of unrelated `.txt` files, the rename behavior may not match what you expect.
-
-### Generate the rename kit after downloading
-If you download more transcripts later, generate a new rename kit again so it reflects the latest batch.
-
----
+It is a record of:
+- what transcripts were tracked
+- what filenames were expected
+- what script instructions were generated
 
 ## Troubleshooting
 
-## The transcript count shows 0
-Possible causes:
-- Zoom hasn’t fully rendered the transcript table yet
-- the page needs another moment to load
-- the extension needs a refresh
+### It does not download all pages
+Turn on **Show debug** and try again.
 
-Try:
-1. refresh the Zoom page
-2. reopen the extension panel
-3. wait a moment for the page to settle
+### It says page-1 reset failed
+The extension is designed to abort rather than risk a partial run.
+Refresh the page and try again.
 
-## Save all available only downloads the first page
-Possible causes:
-- Zoom changed the paginator behavior
-- the extension is not finding the correct next-page button
-
-Try:
-1. turn on **Show debug**
-2. run **Save all available** again
-3. inspect the debug output
-
-## Generate rename kit does nothing
-Possible causes:
-- no transcript entries were tracked yet
-- the extension was not reloaded after an update
-
-Try:
-1. reload the extension in `chrome://extensions`
-2. refresh the Zoom page
-3. run **Save all available** first
-4. then click **Generate rename kit**
-
-## On Windows, PowerShell blocks the script
+### The script will not run on Windows
 Use:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\rename_zoom_transcripts.ps1
 ```
 
-## The script downloaded as `.txt` instead of `.sh`
-Rename it manually to:
+### The script is not a `.sh` file on macOS
+Rename it to:
 
 `rename_zoom_transcripts.sh`
 
@@ -295,20 +129,8 @@ chmod +x rename_zoom_transcripts.sh
 ./rename_zoom_transcripts.sh
 ```
 
----
-
-## Updating the extension
-
-Whenever the extension changes:
-
-1. go to `chrome://extensions`
-2. click **Reload**
-3. refresh the Zoom transcript page
-
----
-
 ## Current version
 
 This guide was written for:
 
-**Zoom Transcript Downloader v1.3.4**
+**Zoom Transcript Downloader v1.4.1**

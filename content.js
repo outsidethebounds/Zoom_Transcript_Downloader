@@ -6,6 +6,7 @@ const PATTERN_HELP_MODAL_ID = 'ztd-pattern-help-modal';
 const ROW_SELECTOR = 'tr.zoom-virtual-table__row';
 const DOWNLOAD_BUTTON_SELECTOR = 'button[aria-label^="Download "]';
 const SAVE_ALL_DELAY_MS = 1500;
+const TRANSITION_TIMEOUT_MS = 15000;
 
 let lastRows = [];
 let logLines = [];
@@ -13,13 +14,14 @@ let currentSettings = null;
 let saveAllController = { running: false, stopRequested: false };
 let downloadManifest = [];
 let rescanTimer = null;
+let currentRunId = null;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function log(message, extra) {
   const line = `[${new Date().toLocaleTimeString()}] ${message}${extra ? ` ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : ''}`;
   logLines.unshift(line);
-  logLines = logLines.slice(0, 120);
+  logLines = logLines.slice(0, 150);
   const el = document.getElementById('ztd-log');
   if (el) el.textContent = logLines.join('\n');
   console.log('[ZTD]', message, extra || '');
@@ -61,7 +63,16 @@ function dateParts(dateText) {
   };
 }
 
-function buildFilename(meta, settings) {
+function normalizeMeta(meta) {
+  const { date, time } = dateParts(meta.dateText || '');
+  return {
+    normalizedTitle: sanitizeTitle(meta.title || '').toLowerCase(),
+    dateISO: date,
+    timeHHMM: time,
+  };
+}
+
+function buildTargetBase(meta, settings) {
   const { date, time } = dateParts(meta.dateText);
   let base = (settings.filenamePattern || '{date} - {time} - {title}')
     .replaceAll('{date}', date)
@@ -69,7 +80,26 @@ function buildFilename(meta, settings) {
     .replaceAll('{title}', sanitizeTitle(meta.title))
     .replaceAll('{meetingId}', meta.meetingId || '');
   base = base.replace(/\s+/g, ' ').trim();
-  return `${base}.txt`;
+  if (settings.includeMeetingId && meta.meetingId && !base.includes(meta.meetingId)) {
+    base = `${base} - ${meta.meetingId}`;
+  }
+  return base;
+}
+
+function applyCollisionSafeFilenames(entries, settings) {
+  const seen = new Map();
+  return entries.map(entry => {
+    const key = entry.targetBase.toLowerCase();
+    const count = seen.get(key) || 0;
+    seen.set(key, count + 1);
+    let finalBase = entry.targetBase;
+    if (count > 0 || entries.filter(e => e.targetBase.toLowerCase() === key).length > 1) {
+      if (entry.meetingId && !finalBase.includes(entry.meetingId)) {
+        finalBase = `${entry.targetBase} - ${entry.meetingId}`;
+      }
+    }
+    return { ...entry, targetFilename: `${finalBase}.txt` };
+  });
 }
 
 function collectRows() {
@@ -83,20 +113,64 @@ function collectRows() {
   return rows;
 }
 
+function rowSignature(rows = collectRows()) {
+  return rows.map(r => `${r.key}|${r.meta?.meetingId || ''}|${r.meta?.dateText || ''}|${r.meta?.title || ''}`).join('||');
+}
+
 function transcriptCountText() {
   const body = document.body.innerText || '';
   const m = body.match(/(\d+)\s+result\(s\)/i);
   return m ? Number(m[1]) : null;
 }
 
-function currentPageNumber() {
-  const body = document.body.innerText || '';
-  const m = body.match(/Page\s+(\d+)/i);
-  return m ? Number(m[1]) : null;
+function basename(filePath = '') {
+  const parts = String(filePath).split(/[\\/]/);
+  return parts[parts.length - 1] || filePath;
+}
+
+function currentPageButton() {
+  return document.querySelector('button[aria-current="page"], button[aria-current="true"], [role="button"][aria-current="page"]');
+}
+
+function inferPageNumberFromButton(button) {
+  const text = (button?.textContent || '').trim();
+  return /^\d+$/.test(text) ? Number(text) : null;
+}
+
+function findPrevPageButton() {
+  return document.querySelector('button.btn-prev[aria-label="Previous page"][aria-disabled="false"]')
+    || document.querySelector('button.btn-prev[aria-label="Previous page"]:not([aria-disabled="true"])');
+}
+
+function findNextPageButton() {
+  return document.querySelector('button.btn-next[aria-label="Next page"][aria-disabled="false"]')
+    || document.querySelector('button.btn-next[aria-label="Next page"]:not([aria-disabled="true"])');
+}
+
+function getPaginationState() {
+  const currentButton = currentPageButton();
+  const currentPage = inferPageNumberFromButton(currentButton);
+  const pageButtons = [...document.querySelectorAll('button')]
+    .map(b => (b.textContent || '').trim())
+    .filter(t => /^\d+$/.test(t))
+    .map(Number);
+  const totalPages = pageButtons.length ? Math.max(...pageButtons) : null;
+  const prevButton = findPrevPageButton();
+  const nextButton = findNextPageButton();
+  return {
+    currentPage,
+    totalPages,
+    prevButton,
+    nextButton,
+    canGoPrev: !!prevButton && prevButton.getAttribute('aria-disabled') !== 'true' && !prevButton.disabled,
+    canGoNext: !!nextButton && nextButton.getAttribute('aria-disabled') !== 'true' && !nextButton.disabled,
+  };
 }
 
 async function getSettings() { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:getSettings` }); }
 async function setSettings(settings) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:setSettings`, settings }); }
+async function getLatestDownloadId() { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:getLatestDownloadId` }); }
+async function waitForObservedDownload(payload) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:waitForObservedDownload`, payload }); }
 
 function installPageHook() {
   if (window.__ztdInjectedScript) return;
@@ -148,15 +222,18 @@ function setSaveAllRunning(isRunning) {
 function updatePanelSummary() {
   const out = document.getElementById('ztd-output');
   if (!out || !currentSettings) return;
+  const pagination = getPaginationState();
   out.textContent = JSON.stringify({
     url: location.href,
     visibleRows: lastRows.length,
     totalAvailable: transcriptCountText(),
-    currentPage: currentPageNumber(),
+    currentPage: pagination.currentPage,
+    totalPages: pagination.totalPages,
     targetOs: currentSettings.targetOs,
+    includeMeetingId: !!currentSettings.includeMeetingId,
     downloadedEntriesTracked: downloadManifest.length,
     perItemDelayMs: SAVE_ALL_DELAY_MS,
-    note: 'Use Save all available to trigger downloads across all pages, then Generate rename kit.'
+    note: 'Use a clean download folder. Save all available resets to page 1 before downloading.'
   }, null, 2);
 }
 
@@ -167,6 +244,21 @@ function scheduleRescan() {
     setStatus(rows);
     updatePanelSummary();
   }, 250);
+}
+
+async function waitForRowsChange(previousSignature, timeoutMs = TRANSITION_TIMEOUT_MS) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    await sleep(300);
+    const rows = collectRows();
+    const sig = rowSignature(rows);
+    if (sig && sig !== previousSignature) {
+      await sleep(500);
+      const stableRows = collectRows();
+      return { ok: true, rows: stableRows, signature: rowSignature(stableRows) };
+    }
+  }
+  return { ok: false };
 }
 
 function ensurePatternHelpModal() {
@@ -222,6 +314,7 @@ function ensureSettingsModal() {
             <option value="windows">Windows</option>
           </select>
         </label>
+        <label><input type="checkbox" id="ztd-settings-include-meeting-id" /> Include meeting ID in every filename</label>
         <div class="ztd-settings-actions">
           <button type="button" id="ztd-settings-save">Save settings</button>
         </div>
@@ -234,15 +327,27 @@ function ensureSettingsModal() {
     modal.querySelector('#ztd-pattern-help').addEventListener('click', () => {
       const help = ensurePatternHelpModal();
       const pattern = modal.querySelector('#ztd-settings-pattern').value || '{date} - {time} - {title}';
-      help.querySelector('#ztd-pattern-help-output').textContent = JSON.stringify({ pattern, example: buildFilename(sampleMeta(), { filenamePattern: pattern }), examples: ['{date} - {time} - {title}','{date} - {title}','{date} - {time} - {title} - {meetingId}'] }, null, 2);
+      help.querySelector('#ztd-pattern-help-output').textContent = JSON.stringify({
+        pattern,
+        example: buildTargetBase(sampleMeta(), { filenamePattern: pattern, includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked }) + '.txt',
+        examples: ['{date} - {time} - {title}', '{date} - {title}', '{date} - {time} - {title} - {meetingId}']
+      }, null, 2);
       help.hidden = false;
     });
     modal.querySelector('#ztd-settings-pattern').addEventListener('input', () => {
       const pattern = modal.querySelector('#ztd-settings-pattern').value || '{date} - {time} - {title}';
-      modal.querySelector('#ztd-pattern-example').textContent = buildFilename(sampleMeta(), { filenamePattern: pattern });
+      modal.querySelector('#ztd-pattern-example').textContent = buildTargetBase(sampleMeta(), { filenamePattern: pattern, includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked }) + '.txt';
+    });
+    modal.querySelector('#ztd-settings-include-meeting-id').addEventListener('change', () => {
+      const pattern = modal.querySelector('#ztd-settings-pattern').value || '{date} - {time} - {title}';
+      modal.querySelector('#ztd-pattern-example').textContent = buildTargetBase(sampleMeta(), { filenamePattern: pattern, includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked }) + '.txt';
     });
     modal.querySelector('#ztd-settings-save').addEventListener('click', async () => {
-      const settings = { filenamePattern: modal.querySelector('#ztd-settings-pattern').value, targetOs: modal.querySelector('#ztd-settings-os').value };
+      const settings = {
+        filenamePattern: modal.querySelector('#ztd-settings-pattern').value,
+        targetOs: modal.querySelector('#ztd-settings-os').value,
+        includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked,
+      };
       await setSettings(settings);
       currentSettings = { ...(currentSettings || {}), ...settings };
       modal.querySelector('#ztd-settings-output').textContent = JSON.stringify({ ok: true, settings }, null, 2);
@@ -258,80 +363,104 @@ async function populateSettingsModal() {
   const settings = await getSettings();
   modal.querySelector('#ztd-settings-pattern').value = settings.filenamePattern || '';
   modal.querySelector('#ztd-settings-os').value = settings.targetOs || 'macos';
-  modal.querySelector('#ztd-pattern-example').textContent = buildFilename(sampleMeta(), settings);
+  modal.querySelector('#ztd-settings-include-meeting-id').checked = !!settings.includeMeetingId;
+  modal.querySelector('#ztd-pattern-example').textContent = buildTargetBase(sampleMeta(), settings) + '.txt';
   modal.querySelector('#ztd-settings-output').textContent = JSON.stringify(settings, null, 2);
   return modal;
 }
 
 async function triggerZoomDownload(item, settings) {
+  const marker = await getLatestDownloadId();
   item.button.click();
+  const observed = await waitForObservedDownload({ afterId: marker?.maxId || 0, timeoutMs: 15000 });
+  const normalized = normalizeMeta(item.meta);
   const entry = {
+    runId: currentRunId,
     title: item.meta.title,
     meetingId: item.meta.meetingId,
     dateText: item.meta.dateText,
-    targetFilename: buildFilename(item.meta, settings),
-    downloadedAt: new Date().toISOString(),
+    page: getPaginationState().currentPage,
     rowKey: item.key,
-    page: currentPageNumber(),
+    sourceFilename: observed?.download?.basename || null,
+    sourcePath: observed?.download?.filename || null,
+    observedDownloadId: observed?.download?.id || null,
+    targetBase: buildTargetBase(item.meta, settings),
+    ...normalized,
   };
   downloadManifest.push(entry);
   updatePanelSummary();
   log('Triggered Zoom browser download', entry);
-  return { ok: true, browserDownloadTriggered: true, targetFilename: entry.targetFilename };
+  if (!entry.sourceFilename) {
+    return { ok: false, error: 'Could not observe the downloaded file in the browser. Rename kit would be unreliable.', entry };
+  }
+  return { ok: true, browserDownloadTriggered: true, sourceFilename: entry.sourceFilename, targetBase: entry.targetBase };
 }
 
-function findNextPageButton() {
-  return document.querySelector('button.btn-next[aria-label="Next page"][aria-disabled="false"]')
-    || document.querySelector('button.btn-next[aria-label="Next page"]:not([aria-disabled="true"])');
+async function gotoFirstPage() {
+  const seen = new Set();
+  for (let steps = 0; steps < 25; steps++) {
+    const state = getPaginationState();
+    const signature = rowSignature();
+    const key = `${state.currentPage || 'unknown'}::${signature}`;
+    if (seen.has(key)) {
+      return { ok: false, error: 'Detected a loop while trying to return to page 1.' };
+    }
+    seen.add(key);
+    if (state.currentPage === 1) return { ok: true, page: 1 };
+    if (!state.canGoPrev) {
+      if (steps === 0) return { ok: true, page: state.currentPage || null };
+      return { ok: false, error: 'Could not continue navigating back to page 1.' };
+    }
+    log('Resetting to page 1', { currentPage: state.currentPage, totalPages: state.totalPages });
+    state.prevButton.click();
+    const moved = await waitForRowsChange(signature);
+    if (!moved.ok) {
+      return { ok: false, error: 'Timed out while trying to return to page 1.' };
+    }
+  }
+  return { ok: false, error: 'Too many attempts while resetting to page 1.' };
 }
 
 async function gotoNextPage() {
-  const next = findNextPageButton();
-  const currentPage = currentPageNumber();
-  const beforeKeys = collectRows().map(r => r.key).join('|');
-  if (!next || next.disabled) {
-    log('No usable next-page button found', { currentPage, disabled: next?.disabled ?? null });
-    return false;
+  const state = getPaginationState();
+  const previousSignature = rowSignature();
+  if (!state.canGoNext || !state.nextButton) {
+    log('No usable next-page button found', { currentPage: state.currentPage, totalPages: state.totalPages });
+    return { ok: false, reason: 'no-next-page' };
   }
 
-  log('Attempting next-page navigation', { currentPage, aria: next.getAttribute('aria-label') || '', text: (next.textContent || '').trim() });
-  next.click();
-
-  for (let i = 0; i < 24; i++) {
-    await sleep(500);
-    const afterPage = currentPageNumber();
-    const afterRows = collectRows();
-    const afterKeys = afterRows.map(r => r.key).join('|');
-    if ((afterPage && currentPage && afterPage !== currentPage) || (afterKeys && afterKeys !== beforeKeys)) {
-      log('Next-page navigation succeeded', { from: currentPage, to: afterPage, rows: afterRows.length });
-      scheduleRescan();
-      return true;
-    }
+  log('Attempting next-page navigation', {
+    currentPage: state.currentPage,
+    totalPages: state.totalPages,
+    aria: state.nextButton.getAttribute('aria-label') || '',
+  });
+  state.nextButton.click();
+  const moved = await waitForRowsChange(previousSignature);
+  if (!moved.ok) {
+    log('Next-page navigation timed out', { currentPage: state.currentPage });
+    return { ok: false, reason: 'timeout' };
   }
-
-  log('Next-page navigation timed out', { currentPage });
-  return false;
+  const afterState = getPaginationState();
+  log('Next-page navigation succeeded', { from: state.currentPage, to: afterState.currentPage, rows: moved.rows.length });
+  return { ok: true, state: afterState };
 }
 
 function generateMacScript(entries) {
   const lines = ['#!/bin/bash', 'set -euo pipefail', '', 'echo "Renaming Zoom transcript files in $(pwd)"', ''];
-  entries.forEach((entry, index) => {
-    const n = index + 1;
-    lines.push(`src=$(ls -1t *.txt | sed -n '${n}p')`);
-    lines.push(`if [ -z "$src" ]; then echo "Missing expected source file for entry ${n}"; exit 1; fi`);
-    lines.push(`mv -n "$src" ${JSON.stringify(entry.targetFilename)}`);
-    lines.push(`echo "Renamed $src -> ${entry.targetFilename.replace(/"/g, '\\"')}"`);
+  entries.forEach(entry => {
+    lines.push(`if [ ! -f ${JSON.stringify(entry.sourceFilename)} ]; then echo "Missing expected source file: ${entry.sourceFilename}"; exit 1; fi`);
+    lines.push(`mv -n ${JSON.stringify(entry.sourceFilename)} ${JSON.stringify(entry.targetFilename)}`);
+    lines.push(`echo "Renamed ${entry.sourceFilename} -> ${entry.targetFilename}"`);
     lines.push('');
   });
   return lines.join('\n') + '\n';
 }
 
 function generatePowerShellScript(entries) {
-  const lines = ['$files = Get-ChildItem -File *.txt | Sort-Object LastWriteTime -Descending', '$index = 0', ''];
+  const lines = [];
   entries.forEach(entry => {
-    lines.push('if ($index -ge $files.Count) { throw "Missing expected source file" }');
-    lines.push(`Rename-Item -LiteralPath $files[$index].FullName -NewName ${JSON.stringify(entry.targetFilename)}`);
-    lines.push('$index++');
+    lines.push(`if (!(Test-Path -LiteralPath ${JSON.stringify(entry.sourceFilename)})) { throw "Missing expected source file: ${entry.sourceFilename}" }`);
+    lines.push(`Rename-Item -LiteralPath ${JSON.stringify(entry.sourceFilename)} -NewName ${JSON.stringify(entry.targetFilename)}`);
     lines.push('');
   });
   return lines.join('\r\n') + '\r\n';
@@ -342,20 +471,39 @@ async function generateRenameKit() {
   if (!downloadManifest.length) {
     return { ok: false, error: 'No downloaded transcript entries have been tracked yet. Use Save all available first.' };
   }
+  if (downloadManifest.some(entry => !entry.sourceFilename)) {
+    return { ok: false, error: 'At least one downloaded file could not be matched to an observed browser download. Refusing to generate an unreliable rename kit.' };
+  }
+
+  const finalizedEntries = applyCollisionSafeFilenames(downloadManifest, settings);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const manifestName = `zoom-transcript-manifest-${timestamp}.json`;
   const scriptName = settings.targetOs === 'windows' ? 'rename_zoom_transcripts.ps1' : 'rename_zoom_transcripts.sh';
   const scriptMime = settings.targetOs === 'windows' ? 'text/plain;charset=utf-8' : 'application/x-sh;charset=utf-8';
-  const scriptContent = settings.targetOs === 'windows' ? generatePowerShellScript(downloadManifest) : generateMacScript(downloadManifest);
+  const scriptContent = settings.targetOs === 'windows' ? generatePowerShellScript(finalizedEntries) : generateMacScript(finalizedEntries);
   const instructions = settings.targetOs === 'windows'
-    ? ['Open PowerShell in the download folder', 'Run: powershell -ExecutionPolicy Bypass -File .\\rename_zoom_transcripts.ps1']
-    : ['Open Terminal in the download folder', 'Run: chmod +x rename_zoom_transcripts.sh', 'Then: ./rename_zoom_transcripts.sh'];
+    ? ['Use a clean download folder.', 'Open PowerShell in that folder.', 'Run: powershell -ExecutionPolicy Bypass -File .\\rename_zoom_transcripts.ps1']
+    : ['Use a clean download folder.', 'Open Terminal in that folder.', 'Run: chmod +x rename_zoom_transcripts.sh', 'Then: ./rename_zoom_transcripts.sh'];
 
-  const manifestPayload = { generatedAt: new Date().toISOString(), targetOs: settings.targetOs, instructions, entries: downloadManifest };
+  const manifestPayload = {
+    generatedAt: new Date().toISOString(),
+    runId: currentRunId,
+    targetOs: settings.targetOs,
+    includeMeetingId: !!settings.includeMeetingId,
+    instructions,
+    requiresCleanFolder: true,
+    entries: finalizedEntries,
+  };
 
-  const manifestResult = await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:downloadArtifact`, payload: { filename: manifestName, content: JSON.stringify(manifestPayload, null, 2), mimeType: 'application/json;charset=utf-8' } });
-  const scriptResult = await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:downloadArtifact`, payload: { filename: scriptName, content: scriptContent, mimeType: scriptMime } });
-  return { ok: !!(manifestResult?.ok && scriptResult?.ok), manifestResult, scriptResult, instructions, entries: downloadManifest.length };
+  const manifestResult = await chrome.runtime.sendMessage({
+    type: `${EXTENSION_NS}:downloadArtifact`,
+    payload: { filename: manifestName, content: JSON.stringify(manifestPayload, null, 2), mimeType: 'application/json;charset=utf-8' }
+  });
+  const scriptResult = await chrome.runtime.sendMessage({
+    type: `${EXTENSION_NS}:downloadArtifact`,
+    payload: { filename: scriptName, content: scriptContent, mimeType: scriptMime }
+  });
+  return { ok: !!(manifestResult?.ok && scriptResult?.ok), manifestResult, scriptResult, instructions, entries: finalizedEntries.length };
 }
 
 function renderPanel(rows, settings) {
@@ -402,7 +550,7 @@ function renderPanel(rows, settings) {
     });
     panel.querySelector('#ztd-debug-toggle').addEventListener('change', applyDebugVisibility);
 
-    async function runGenerateKit() {
+    panel.querySelector('#ztd-generate-kit-main').addEventListener('click', async () => {
       const result = await generateRenameKit();
       panel.querySelector('#ztd-output').textContent = JSON.stringify(result.ok ? {
         message: 'Rename kit generated.',
@@ -411,12 +559,11 @@ function renderPanel(rows, settings) {
         manifestDownload: result.manifestResult,
         scriptDownload: result.scriptResult
       } : result, null, 2);
-    }
-
-    panel.querySelector('#ztd-generate-kit-main').addEventListener('click', runGenerateKit);
+    });
 
     panel.querySelector('#ztd-save-all').addEventListener('click', async () => {
       const settingsNow = await getSettings();
+      currentRunId = `run-${Date.now()}`;
       downloadManifest = [];
       updatePanelSummary();
       saveAllController = { running: true, stopRequested: false };
@@ -424,14 +571,28 @@ function renderPanel(rows, settings) {
       const results = [];
       let pagesVisited = 0;
       try {
+        const reset = await gotoFirstPage();
+        if (!reset.ok) {
+          panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: reset.error, action: 'Aborted before download because page-1 reset failed.' }, null, 2);
+          return;
+        }
+
+        const visitedSignatures = new Set();
         while (true) {
           const rowsNow = collectRows();
+          const signature = rowSignature(rowsNow);
+          if (visitedSignatures.has(signature)) {
+            panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: 'Detected duplicate page signature during pagination. Aborting to avoid looping.', pagesVisited, downloaded: downloadManifest.length }, null, 2);
+            return;
+          }
+          visitedSignatures.add(signature);
           pagesVisited += 1;
-          log('Processing page', { page: currentPageNumber(), rows: rowsNow.length, pagesVisited });
+          const pagination = getPaginationState();
+          log('Processing page', { page: pagination.currentPage, totalPages: pagination.totalPages, rows: rowsNow.length, pagesVisited });
           if (!rowsNow.length) break;
           for (let i = 0; i < rowsNow.length; i++) {
             if (saveAllController.stopRequested) {
-              results.push({ stopped: true, page: currentPageNumber(), processed: downloadManifest.length });
+              results.push({ stopped: true, page: pagination.currentPage, processed: downloadManifest.length });
               panel.querySelector('#ztd-output').textContent = JSON.stringify(results, null, 2);
               return;
             }
@@ -439,8 +600,8 @@ function renderPanel(rows, settings) {
             await sleep(SAVE_ALL_DELAY_MS);
           }
           const moved = await gotoNextPage();
-          if (!moved) break;
-          await sleep(1000);
+          if (!moved.ok) break;
+          await sleep(800);
         }
       } finally {
         saveAllController.running = false;
@@ -474,7 +635,7 @@ async function boot(verbose = false) {
   const rows = collectRows();
   renderPanel(rows, settings);
   scheduleRescan();
-  if (verbose) log('Panel ready', { rows: rows.length, total: transcriptCountText(), page: currentPageNumber(), targetOs: settings.targetOs, tracked: downloadManifest.length, delayMs: SAVE_ALL_DELAY_MS });
+  if (verbose) log('Panel ready', { rows: rows.length, total: transcriptCountText(), pagination: getPaginationState(), tracked: downloadManifest.length, delayMs: SAVE_ALL_DELAY_MS });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

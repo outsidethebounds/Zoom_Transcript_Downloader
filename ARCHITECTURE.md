@@ -4,158 +4,137 @@
 
 This is a Manifest V3 Chrome extension that runs against the Zoom transcript recordings page.
 
-At a high level it does three things:
-1. injects UI into the Zoom transcript page
-2. uses DOM interaction to trigger Zoom transcript downloads
-3. generates a rename kit (manifest JSON + OS-specific script) after downloads are triggered
+High-level responsibilities:
+1. inject UI into the Zoom transcript page
+2. drive Zoom transcript downloads through the page’s own download buttons
+3. reset to page 1 and traverse paginated results
+4. observe actual browser downloads via the Chrome downloads API
+5. generate a manifest JSON and OS-specific rename script using **exact observed source filenames**
 
-It is intentionally browser-driven. Earlier session work used a localhost helper service, but that architecture was abandoned in favor of a browser-only flow plus a generated post-processing script.
+This is now a browser-only architecture. Earlier helper-based designs were abandoned.
 
 ## Main components / modules
 
 ### `manifest.json`
 Defines:
-- MV3 service worker background
-- permissions: `downloads`, `storage`, `activeTab`, `scripting`, `tabs`
-- content script injection into transcript page URLs
-- `page-hook.js` as a web-accessible resource
+- MV3 extension
+- service worker background
+- content script injection into Zoom transcript URLs
+- permissions for downloads, storage, tabs, scripting
 
 ### `background.js`
 Responsibilities:
-- infer default target OS using `chrome.runtime.getPlatformInfo()`
-- store / fetch settings via `chrome.storage.local`
-- set extension badge on matching Zoom transcript URLs
-- respond to:
-  - `zoomTranscriptExtension:getSettings`
-  - `zoomTranscriptExtension:setSettings`
-  - `zoomTranscriptExtension:downloadArtifact`
-- create downloadable manifest/script artifacts using a data URL + `chrome.downloads.download`
+- infer default OS at install/startup
+- persist settings in `chrome.storage.local`
+- set badge on matching Zoom URLs
+- observe actual browser downloads with:
+  - `chrome.downloads.onCreated`
+  - `chrome.downloads.onChanged`
+- provide message handlers for:
+  - settings get/set
+  - latest observed download id
+  - wait for next observed download
+  - artifact downloads (manifest/script)
 
 ### `content.js`
-This is the core of the product.
+Primary runtime and still the biggest file.
 
 Responsibilities:
-- detect transcript rows on the page
-- parse meeting metadata from row text
-- inject and manage the on-page panel UI
-- manage settings modal and filename-pattern help modal
-- trigger Zoom transcript downloads by clicking the page’s own download buttons
-- track downloaded items into `downloadManifest`
-- traverse pagination for `Save all available`
-- generate rename kit content and request background download of those artifacts
-- maintain debug logs
-
-Key state in this file:
-- `lastRows`
-- `logLines`
-- `currentSettings`
-- `saveAllController`
-- `downloadManifest`
-- `rescanTimer`
+- parse transcript rows from Zoom DOM
+- compute pagination state
+- reset to page 1 before `Save all available`
+- traverse pages with loop protection
+- trigger transcript downloads and pair each click with an observed browser download filename
+- store run state in `downloadManifest`
+- generate rename kit using exact source filenames
+- render the panel UI and settings modal
 
 ### `content.css`
-Styles the injected UI:
-- panel
-- launcher button
-- settings modal
-- pattern help modal
-- debug area
-- stop button states
+Styles injected panel and modals.
 
 ### `page-hook.js`
-Historical artifact from earlier attempts to intercept page-world network behavior. It still exists and is injected, but current rename-kit workflow relies primarily on DOM click + local manifest tracking rather than helper-mediated content capture.
+Legacy helper-era artifact. Still present, not central to current workflow.
 
 ### `popup.html` / `popup.js`
-Legacy UI from earlier iterations. Current workflow is panel-first, not popup-first. These files still exist and may be removable later if truly unused.
+Legacy popup-era artifacts. Current UX is page-panel driven.
 
 ## Data flow
 
-### Main use path
-1. User opens Zoom transcript page
-2. Extension icon click sends `zoomTranscriptExtension:openPanel`
-3. `content.js` boots panel, scans visible transcript rows, updates UI
-4. User clicks `Save all available`
-5. `content.js`:
-   - collects visible rows
-   - clicks each row’s download button
-   - records metadata into `downloadManifest`
-   - attempts to move to next Zoom paginator page
-   - repeats until no more pages or stop requested
-6. User clicks `Generate rename kit`
-7. `content.js` builds:
+### Download flow
+1. user opens Zoom transcript page
+2. content script boots panel
+3. user clicks `Save all available`
+4. extension:
+   - resets manifest/run state
+   - tries to navigate back to page 1
+   - aborts if page-1 reset fails
+   - processes visible rows page by page
+   - for each row:
+     - click Zoom download button
+     - ask background to wait for the next observed browser download
+     - store the observed source filename in `downloadManifest`
+   - advances with the transcript paginator until exhausted or stopped
+
+### Rename-kit flow
+1. user clicks `Generate rename kit`
+2. `content.js` verifies all entries have observed source filenames
+3. collisions are resolved by appending meeting ID when needed
+4. extension generates:
    - manifest JSON
    - `.sh` or `.ps1` rename script
-8. `content.js` asks `background.js` to download those artifacts
-9. User runs the generated script in the transcript download folder
-
-### Settings flow
-1. Settings modal reads current settings from `chrome.storage.local`
-2. User changes filename pattern / target OS
-3. `content.js` sends `setSettings`
-4. `background.js` persists values
-5. `content.js` updates summary UI
+5. `background.js` downloads those artifacts
 
 ## Key entry points
 
-### Browser / extension entry points
-- `background.js`: service worker boot
-- `chrome.action.onClicked` → send `zoomTranscriptExtension:openPanel`
-- `content.js` immediate `boot()` on page load
-
-### Main UI handlers in `content.js`
-- `#ztd-save-all`
-- `#ztd-generate-kit-main`
-- `#ztd-stop-save-all`
-- `#ztd-settings`
-- `#ztd-collapse`
+- `background.js`
+  - `chrome.action.onClicked`
+  - `chrome.downloads.onCreated`
+  - `chrome.downloads.onChanged`
+- `content.js`
+  - `boot()`
+  - `gotoFirstPage()`
+  - `gotoNextPage()`
+  - `triggerZoomDownload()`
+  - `generateRenameKit()`
 
 ## Important dependencies
 
-No npm runtime dependencies are used by the extension itself.
+No npm runtime dependencies.
 
 Relies on:
 - Chrome extension APIs
-- Zoom’s current DOM structure
+- Zoom’s current DOM and paginator behavior
 - browser download behavior
-
-Developer tooling used in session:
-- `node --check` for syntax validation
-- git for versioning/pushing
 
 ## External services / integrations
 
 ### Zoom website
-- hard dependency
-- current target page: `https://zoom.us/recording/meeting/transcript*` (and subdomains)
-- the extension is tightly coupled to Zoom’s DOM and pagination controls
+Hard dependency. The system is tightly coupled to Zoom DOM structure and button labels/classes.
 
-### Chrome Extension APIs
+### Chrome / Edge extension APIs
+Core APIs used:
 - `chrome.storage.local`
-- `chrome.downloads.download`
-- `chrome.runtime.getPlatformInfo`
+- `chrome.downloads.*`
+- `chrome.runtime.*`
 - `chrome.tabs.*`
 - `chrome.action.*`
 
-### GitHub
-- repo push target only, not runtime
-
 ## Read these files first
 
-For a new LLM, read in this order:
 1. `README.md`
-2. `handoff/PROJECT_BRIEF.md`
-3. `handoff/CURRENT_STATE.md`
-4. `handoff/ACTIVE_PRIORITIES.md`
-5. `handoff/KNOWN_ISSUES.md`
-6. `DECISIONS.md`
-7. `content.js`
-8. `background.js`
-9. `manifest.json`
-10. `USER_GUIDE.md`
+2. `USER_GUIDE.md`
+3. `handoff/PROJECT_BRIEF.md`
+4. `handoff/CURRENT_STATE.md`
+5. `handoff/ACTIVE_PRIORITIES.md`
+6. `handoff/KNOWN_ISSUES.md`
+7. `DECISIONS.md`
+8. `content.js`
+9. `background.js`
+10. `TESTING.md`
 
 ## Candid notes
 
-- `content.js` is doing too much. UI, DOM parsing, pagination, manifest generation, and script generation all live in one file.
-- Pagination is the riskiest area because it depends on Zoom’s DOM behavior.
-- The rename kit assumes order-based file matching, which is brittle.
-- There are legacy remnants from abandoned designs (helper/popup) that are still present.
+- `content.js` is still overloaded and should eventually be split.
+- Pagination remains the highest runtime risk.
+- Rename reliability is much improved versus pure mtime ordering, but still depends on correctly observing browser downloads during the run.
+- Legacy files remain and may be removable after stabilization.

@@ -1,9 +1,11 @@
 const BASE_DEFAULTS = {
   filenamePattern: '{date} - {time} - {title}',
-  targetOs: 'macos'
+  targetOs: 'macos',
+  includeMeetingId: false,
 };
 
 const ACTIVE_HOST_RE = /^https:\/\/(?:[^/]+\.)?zoom\.us\/recording\/meeting\/transcript/i;
+const observedDownloads = [];
 
 async function inferDefaultOs() {
   try {
@@ -12,6 +14,49 @@ async function inferDefaultOs() {
     if (info?.os === 'mac') return 'macos';
   } catch {}
   return 'macos';
+}
+
+function basename(filePath = '') {
+  const parts = String(filePath).split(/[\\/]/);
+  return parts[parts.length - 1] || filePath;
+}
+
+function recordDownload(item) {
+  observedDownloads.push({
+    id: item.id,
+    filename: item.filename || '',
+    basename: basename(item.filename || item.finalUrl || item.url || ''),
+    url: item.finalUrl || item.url || '',
+    createdAt: Date.now(),
+    state: item.state || 'in_progress',
+  });
+  while (observedDownloads.length > 200) observedDownloads.shift();
+}
+
+chrome.downloads.onCreated.addListener(item => {
+  recordDownload(item);
+});
+
+chrome.downloads.onChanged.addListener(delta => {
+  const found = observedDownloads.find(d => d.id === delta.id);
+  if (!found) return;
+  if (delta.filename?.current) {
+    found.filename = delta.filename.current;
+    found.basename = basename(delta.filename.current);
+  }
+  if (delta.state?.current) {
+    found.state = delta.state.current;
+  }
+});
+
+async function waitForObservedDownload({ afterId = 0, timeoutMs = 15000 }) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const next = observedDownloads.find(d => d.id > afterId && !/zoom-transcript-manifest|rename_zoom_transcripts/i.test(d.basename));
+    if (next) return next;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  return null;
 }
 
 async function setActionForTab(tabId, url) {
@@ -68,6 +113,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === 'zoomTranscriptExtension:setSettings') {
     chrome.storage.local.set(message.settings || {}).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:getLatestDownloadId') {
+    const maxId = observedDownloads.length ? Math.max(...observedDownloads.map(d => d.id)) : 0;
+    sendResponse({ ok: true, maxId });
+    return false;
+  }
+  if (message?.type === 'zoomTranscriptExtension:waitForObservedDownload') {
+    waitForObservedDownload(message.payload || {})
+      .then(download => sendResponse({ ok: !!download, download }))
+      .catch(error => sendResponse({ ok: false, error: String(error) }));
     return true;
   }
   if (message?.type === 'zoomTranscriptExtension:downloadArtifact') {

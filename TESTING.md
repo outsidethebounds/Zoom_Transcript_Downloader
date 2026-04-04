@@ -2,99 +2,92 @@
 
 ## How to run tests
 
-There is no automated test suite in this repo right now.
-
-Current practical checks are manual plus syntax validation.
+There is still no automated test suite. Current validation is syntax + manual browser verification.
 
 ### Syntax validation
-Run from the extension folder:
-
 ```bash
 node --check background.js
 node --check content.js
 ```
 
-### Manual browser test flow
-1. Load unpacked extension in Chrome
-2. Open Zoom transcript page
-3. Confirm panel appears
-4. Confirm transcript count updates from the page
-5. Open Settings and verify:
-   - filename pattern edits work
-   - target OS default is sensible
-6. Run `Save all available`
-7. Verify:
-   - transcript downloads trigger
-   - pagination advances past page 1 when applicable
-   - stop button works mid-run
-8. Run `Generate rename kit`
-9. Verify:
-   - manifest downloads
-   - script downloads with expected extension
-10. Run generated script in a controlled folder
-11. Verify filenames match expected pattern
+## Required manual verification after changes
 
-## Current test coverage shape
+### 1. Extension boot
+- Load unpacked extension in Chrome/Edge
+- Open Zoom transcript page
+- Click extension icon
+- Verify panel appears
+- Verify transcript count updates after Zoom renders
 
-- **Automated coverage:** none
-- **Manual coverage:** all major behavior
-- **Validation used during session:** repeated `node --check` after edits
+### 2. Settings
+- Open Settings
+- Verify target OS default is correct for current machine
+- Verify filename pattern changes update the example
+- Verify include-meeting-ID toggle persists
+
+### 3. Save all available
+Must verify all of these:
+- run starts by trying to return to page 1
+- if page-1 reset fails, run aborts clearly
+- pagination advances beyond first page when more pages exist
+- stop button works
+- manifest resets between runs
+
+### 4. Browser download observation
+For each transcript click during save-all:
+- background observes the actual browser download
+- `downloadManifest` entry gets a real `sourceFilename`
+- no rename kit is generated if source filenames are missing
+
+### 5. Rename kit generation
+Verify both files download:
+- manifest JSON
+- `.sh` or `.ps1` script
+
+Verify:
+- default filename format is `date - time - title`
+- collisions append meeting ID
+- OS-specific instructions are correct
+
+### 6. Script execution
+Run generated scripts in a clean folder with real downloaded transcript files.
+
+#### macOS
+```bash
+chmod +x rename_zoom_transcripts.sh
+./rename_zoom_transcripts.sh
+```
+
+#### Windows
+```powershell
+powershell -ExecutionPolicy Bypass -File .\rename_zoom_transcripts.ps1
+```
+
+Verify files are renamed from exact observed source filenames, not inferred order.
+
+## Current coverage shape
+- Automated tests: none
+- Syntax checks: yes
+- Manual testing: required for all meaningful behavior
 
 ## Known gaps
+No automated tests for:
+- row parsing
+- pagination state detection
+- page-1 reset behavior
+- download observation logic
+- collision handling
+- generated script correctness
 
-No automated tests exist for:
-- row parsing from Zoom DOM text
-- paginator detection
-- manifest generation
-- script generation correctness
-- artifact download behavior in Chrome
-- OS default inference
-- script matching against real browser download ordering
+## Flaky / risky areas
+- Zoom paginator DOM may change
+- page-number detection may be absent or unreliable
+- download observation may behave differently across browsers/platforms
+- script extension handling still needs real-world validation on both OSes
 
-## Flaky tests or missing test areas
-
-There are no formal flaky tests, but these areas are inherently flaky in manual testing:
-- Zoom pagination DOM changes
-- browser download timing/order
-- whether generated script is saved with correct extension
-- row text parsing if Zoom changes layout or wording
-
-## What must be verified after making changes
-
-Always verify all of these after touching `content.js`, `background.js`, or `manifest.json`:
-
-1. **Panel boot**
-   - extension icon opens the page panel
-   - transcript count updates after Zoom renders
-
-2. **Pagination**
-   - `Save all available` advances beyond first page
-   - current selector still matches the transcript paginator
-
-3. **Download tracking**
-   - `downloadManifest` count matches what the user expects from the run
-
-4. **Rename kit generation**
-   - both manifest and script download
-   - file extensions are correct enough to be usable
-
-5. **OS-specific output**
-   - macOS generates `.sh`
-   - Windows generates `.ps1`
-   - instructions shown are correct
-
-6. **Generated script execution**
-   - run script in a clean folder with transcript files
-   - verify rename order and output names
-
-7. **Regression checks**
-   - settings still save
-   - stop button still works
-   - debug mode still reveals useful logs
-
-## Recommended future test additions
-
-If this repo gets a test harness later, prioritize:
-- pure function tests for `parseRowText`, `buildFilename`, script generation
-- DOM fixture tests for row collection and paginator button selection
-- snapshot tests for generated manifest/script content
+## Recommended future tests
+If test coverage is added, prioritize:
+1. pure-function tests for filename generation and collision behavior
+2. DOM-fixture tests for row parsing and paginator detection
+3. manifest/script snapshot tests
+4. integration test harness for download observation if feasible
