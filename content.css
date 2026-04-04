@@ -1,0 +1,162 @@
+#ztd-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 520px;
+  max-height: 78vh;
+  overflow: auto;
+  z-index: 2147483647;
+  background: #111827;
+  color: #f9fafb;
+  border: 1px solid #374151;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  padding: 12px;
+  font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+#ztd-launcher {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483646;
+  background: #2563eb;
+  color: #fff;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.25);
+  cursor: pointer;
+  font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+#ztd-settings-modal,
+#ztd-pattern-help-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483648;
+  background: rgba(0,0,0,.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#ztd-settings-card,
+#ztd-pattern-help-card {
+  width: min(560px, 92vw);
+  max-height: 80vh;
+  overflow: auto;
+  background: #111827;
+  color: #f9fafb;
+  border: 1px solid #374151;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+#ztd-panel .ztd-header,
+#ztd-panel .ztd-controls,
+#ztd-panel .ztd-debug-row,
+#ztd-settings-card .ztd-settings-actions,
+#ztd-pattern-help-card .ztd-help-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+#ztd-panel .ztd-header-left,
+#ztd-panel .ztd-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#ztd-panel button,
+#ztd-settings-card button,
+#ztd-pattern-help-card button {
+  background: #2563eb;
+  color: white;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+#ztd-panel button.ztd-secondary,
+#ztd-settings-card button.ztd-secondary,
+#ztd-pattern-help-card button.ztd-secondary {
+  background: #374151;
+}
+#ztd-stop-save-all {
+  background: #6b7280 !important;
+  color: #fff !important;
+}
+#ztd-stop-save-all.ztd-active {
+  background: #dc2626 !important;
+}
+#ztd-panel .ztd-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+}
+#ztd-panel pre,
+#ztd-settings-card pre,
+#ztd-pattern-help-card pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 8px;
+  padding: 10px;
+  margin: 0;
+}
+#ztd-output,
+#ztd-log,
+#ztd-settings-output,
+#ztd-pattern-help-output {
+  background: #e5e7eb;
+  color: #111827;
+  border: 1px solid #9ca3af;
+}
+#ztd-log {
+  max-height: 260px;
+  overflow: auto;
+}
+#ztd-debug-wrap[hidden],
+#ztd-settings-modal[hidden],
+#ztd-pattern-help-modal[hidden] {
+  display: none !important;
+}
+#ztd-panel.ztd-collapsed #ztd-output,
+#ztd-panel.ztd-collapsed #ztd-debug-wrap,
+#ztd-panel.ztd-collapsed .ztd-spacer,
+#ztd-panel.ztd-collapsed .ztd-debug-row {
+  display: none !important;
+}
+#ztd-settings-card input[type="text"],
+#ztd-settings-card select {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid #6b7280;
+  padding: 6px 8px;
+  color: #111827;
+  background: #f9fafb;
+}
+#ztd-panel .ztd-gear-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  padding: 0;
+  font-weight: 700;
+  font-size: 12px;
+}
+#ztd-pattern-help-card table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+#ztd-pattern-help-card th,
+#ztd-pattern-help-card td {
+  border: 1px solid #4b5563;
+  padding: 6px 8px;
+  text-align: left;
+}
