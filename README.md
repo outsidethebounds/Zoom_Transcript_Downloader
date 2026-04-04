@@ -25,6 +25,7 @@ Chrome extension for Zoom transcript pages that:
 - Configurable filename pattern
 - Optional meeting ID in filenames
 - Collision handling by appending meeting ID
+- Generated rename scripts now skip/report existing-target collisions instead of stopping at the first one
 - Rename kit generation using captured source filenames
 - Debug mode hidden behind a toggle
 

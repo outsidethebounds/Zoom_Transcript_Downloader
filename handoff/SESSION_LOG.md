@@ -42,14 +42,14 @@ Docs:
 
 ## Unfinished work
 
-- pagination still needs stronger proof/fixes on real Zoom pages
-- rename matching remains order-based and brittle
-- generated script extension handling may still be imperfect depending on browser behavior
-- legacy files should probably be cleaned up or removed
+- legacy files should probably be cleaned up or removed after one more conservative audit
+- `content.js` is still large and should eventually be split for maintainability
+- lightweight tests exist now, but broader regression coverage is still missing
 
 ## Recommended next step
 
-Open a real Zoom transcript page with more than 15 entries and focus exclusively on:
-1. proving or fixing `Save all available` pagination
-2. verifying `downloadManifest` count equals expected total
-3. generating a rename kit and verifying it matches the latest full run
+Shift from bug-hunting to hardening/cleanup:
+1. preserve current working behavior
+2. add a few more targeted tests around script generation/output
+3. conservatively audit legacy files (`popup.*`, `page-hook.js`)
+4. avoid large refactors unless there is a concrete regression-prevention reason

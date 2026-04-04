@@ -74,26 +74,26 @@ The repo must contain:
 ## Manual validation checklist
 
 ### Browser/runtime validation
-- [ ] extension loads without stale-runtime issues after install/reload
-- [ ] panel opens from extension icon
-- [ ] transcript count looks sane
-- [ ] disabled transcript rows are skipped
-- [ ] settings save correctly
+- [x] extension loads without stale-runtime issues after install/reload
+- [x] panel opens from extension icon
+- [x] transcript count looks sane
+- [x] disabled transcript rows are skipped
+- [x] settings save correctly
 
 ### Save-all validation
-- [ ] starting on page 1 works
-- [ ] starting on page 2+ resets correctly and still completes full run
-- [ ] multi-page download goes past 15 items
-- [ ] stop button works during run
-- [ ] manifest resets between runs
+- [x] starting on page 1 works
+- [x] starting on page 2+ resets correctly and still completes full run
+- [x] multi-page download goes past 15 items
+- [x] stop button works during run
+- [x] manifest resets between runs
 
 ### Rename-kit validation
-- [ ] manifest downloads
-- [ ] script downloads
-- [ ] macOS script executes successfully
-- [ ] Windows script executes successfully via PowerShell bypass command
-- [ ] renamed output matches expected filenames
-- [ ] collision handling appends meeting ID when needed
+- [x] manifest downloads
+- [x] script downloads
+- [x] macOS script executes successfully
+- [x] Windows script executes successfully via PowerShell bypass command
+- [x] renamed output matches expected filenames
+- [x] collision handling appends meeting ID when needed
 
 ## Known acceptable limitations at release time
 These are acceptable for now if the core workflow is stable:

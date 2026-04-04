@@ -8,11 +8,13 @@
 - Filename pattern is configurable
 - Meeting ID can be toggled on explicitly
 - Save-all flow resets to page 1 before downloading
-- Multi-page `Save all available` has now been manually tested successfully in this session
+- Multi-page `Save all available` has been manually tested successfully in this session
 - Starting from a non-first transcript page has been manually tested successfully in this session
 - Disabled / greyed-out download rows are skipped correctly
 - Browser downloads are observed in the background service worker
-- Rename kit now uses captured source filenames instead of pure timestamp/order matching
+- Rename kit uses captured source filenames instead of pure timestamp/order matching
+- HTML entities in titles are decoded before filename generation
+- Generated scripts skip/report existing-target collisions instead of hard-failing
 - Generate rename kit has been manually tested successfully after multi-page runs in this session
 - Repo and handoff docs are pushed to GitHub
 

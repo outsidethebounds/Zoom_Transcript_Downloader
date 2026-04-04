@@ -1,11 +1,12 @@
 # Zoom Transcript Downloader — User Guide
 
-Version: 1.4.4
+Version: 1.4.5
 
 ## What this extension does
 
 This extension helps you:
 - download all Zoom transcript files across all available transcript pages
+- skip entries where Zoom shows a disabled/greyed-out download button
 - generate a rename kit that renames those files into clean filenames
 
 The rename kit contains:
