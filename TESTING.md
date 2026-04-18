@@ -8,6 +8,13 @@ There is still no automated test suite. Current validation is syntax + manual br
 ```bash
 node --check background.js
 node --check content.js
+node --check popup.js
+node --check page-hook.js
+```
+
+### Lightweight automated logic test
+```bash
+node tests/logic.test.mjs
 ```
 
 ## Required manual verification after changes
@@ -32,6 +39,8 @@ Must verify all of these:
 - pagination advances beyond first page when more pages exist
 - starting from a later page still results in a full run
 - disabled / greyed-out transcript rows are skipped
+- rows using both `1 day` and `N days` parse correctly
+- running-job notification appears when bulk download starts
 - stop button works
 - manifest resets between runs
 
@@ -68,17 +77,15 @@ powershell -ExecutionPolicy Bypass -File .\rename_zoom_transcripts.ps1
 Verify files are renamed from exact observed source filenames, not inferred order.
 
 ## Current coverage shape
-- Automated tests: none
+- Automated tests: lightweight pure-logic coverage in `tests/logic.test.mjs`
 - Syntax checks: yes
-- Manual testing: required for all meaningful behavior
+- Manual testing: still required for end-to-end browser behavior
 
 ## Known gaps
 No automated tests for:
-- row parsing
 - pagination state detection
 - page-1 reset behavior
 - download observation logic
-- collision handling
 - generated script correctness
 
 ## Flaky / risky areas

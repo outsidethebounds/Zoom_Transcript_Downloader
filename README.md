@@ -21,12 +21,15 @@ Chrome extension for Zoom transcript pages that:
 - Injected panel on `zoom.us/recording/meeting/transcript*`
 - `Save all available` across paginated transcript listings, including successful tested runs from non-first pages
 - Automatic run reset before each save-all
+- Skips greyed-out / unavailable transcript rows and reports how many were unavailable on the current page
 - OS auto-default based on install platform
 - Configurable filename pattern
 - Optional meeting ID in filenames
 - Collision handling by appending meeting ID
 - Generated rename scripts now skip/report existing-target collisions instead of stopping at the first one
 - Rename kit generation using captured source filenames
+- Running-job notifications in the page UI while bulk download is active
+- README help button (`?`) in the panel header
 - Debug mode hidden behind a toggle
 
 ## How to run it
@@ -42,9 +45,10 @@ Chrome extension for Zoom transcript pages that:
 2. Click the extension icon
 3. Make sure you plan to use a **clean download folder**
 4. Click **Save all available**
-5. Wait for the run to finish
-6. Click **Generate rename kit**
-7. Run the generated script in the folder containing the downloaded transcript `.txt` files
+5. Leave the tab open while the running-job notification is active
+6. Wait for the run to finish
+7. Click **Generate rename kit**
+8. Run the generated script in the folder containing the downloaded transcript `.txt` files
 
 ### Run generated script
 #### macOS

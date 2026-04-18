@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zoom Transcript Downloader",
-  "version": "1.4.4",
+  "version": "1.5.4",
   "description": "Downloads Zoom transcripts and generates rename scripts for macOS or Windows.",
   "permissions": [
     "downloads",
@@ -44,7 +44,19 @@
       "run_at": "document_idle"
     }
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_title": "Zoom Transcript Downloader"
+    "default_title": "Zoom Transcript Downloader",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }

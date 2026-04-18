@@ -49,7 +49,7 @@ function applyCollisionSafeFilenames(entries) {
 
 function parseRowText(text) {
   const compact = (text || '').replace(/\s+/g, ' ').trim();
-  const match = compact.match(/^(.*?)\s+(\d{3}\s\d{4}\s\d{4})\s+\S+@\S+\s+([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+[AP]M)\s+\d+\s+days\s+Download\s+Delete$/);
+  const match = compact.match(/^(.*?)\s+(\d{3}\s\d{4}\s\d{4})\s+\S+@\S+\s+([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+[AP]M)\s+\d+\s+day(?:s)?\s+Download\s+Delete$/);
   if (!match) return null;
   return {
     title: match[1].trim(),
@@ -88,6 +88,13 @@ function run() {
     title: 'Weekly Sync',
     meetingId: '12345678901',
     dateText: 'Apr 4, 2026 9:30 AM',
+  });
+
+  const parsedSingular = parseRowText("Last Page Meeting 123 4567 8901 foo@bar.com Apr 18, 2026 7:01 AM 1 day Download Delete");
+  assert.deepEqual(parsedSingular, {
+    title: 'Last Page Meeting',
+    meetingId: '12345678901',
+    dateText: 'Apr 18, 2026 7:01 AM',
   });
 
   console.log('logic.test.mjs: all tests passed');

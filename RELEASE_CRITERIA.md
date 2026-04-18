@@ -61,6 +61,8 @@ The extension must:
 - default to collapsed panel state
 - default target OS based on install platform
 - keep debug mode hidden behind a toggle
+- provide a visible running-job notification during bulk download
+- provide a README/help affordance from the panel header
 - provide clear script execution instructions for macOS and Windows
 - clearly communicate the clean-folder requirement
 
@@ -78,6 +80,8 @@ The repo must contain:
 - [x] panel opens from extension icon
 - [x] transcript count looks sane
 - [x] disabled transcript rows are skipped
+- [x] running-job notification appears when save-all starts
+- [x] README/help button opens the GitHub README
 - [x] settings save correctly
 
 ### Save-all validation

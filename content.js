@@ -5,8 +5,8 @@ const SETTINGS_MODAL_ID = 'ztd-settings-modal';
 const PATTERN_HELP_MODAL_ID = 'ztd-pattern-help-modal';
 const ROW_SELECTOR = 'tr.zoom-virtual-table__row';
 const DOWNLOAD_BUTTON_SELECTOR = 'button[aria-label^="Download "]';
-const SAVE_ALL_DELAY_MS = 1500;
-const TRANSITION_TIMEOUT_MS = 15000;
+const SAVE_ALL_DELAY_MS = 600;
+const TRANSITION_TIMEOUT_MS = 30000;
 
 let lastRows = [];
 let logLines = [];
@@ -18,6 +18,22 @@ let currentRunId = null;
 let stickyPanelMessage = null;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function showToast(message, kind = 'info', timeoutMs = 3500) {
+  let toast = document.getElementById('ztd-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'ztd-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.dataset.kind = kind;
+  toast.hidden = false;
+  if (toast.__timer) clearTimeout(toast.__timer);
+  toast.__timer = setTimeout(() => {
+    toast.hidden = true;
+  }, timeoutMs);
+}
 
 function log(message, extra) {
   const line = `[${new Date().toLocaleTimeString()}] ${message}${extra ? ` ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : ''}`;
@@ -38,7 +54,7 @@ function sanitizeTitle(title) {
 
 function parseRowText(text) {
   const compact = (text || '').replace(/\s+/g, ' ').trim();
-  const match = compact.match(/^(.*?)\s+(\d{3}\s\d{4}\s\d{4})\s+\S+@\S+\s+([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+[AP]M)\s+\d+\s+days\s+Download\s+Delete$/);
+  const match = compact.match(/^(.*?)\s+(\d{3}\s\d{4}\s\d{4})\s+\S+@\S+\s+([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+[AP]M)\s+\d+\s+day(?:s)?\s+Download\s+Delete$/);
   if (!match) return null;
   return {
     title: match[1].trim(),
@@ -111,8 +127,8 @@ function isEnabledDownloadButton(button) {
   return true;
 }
 
-function collectRows() {
-  const rows = [...document.querySelectorAll(ROW_SELECTOR)].map((row, index) => {
+function scanRows() {
+  return [...document.querySelectorAll(ROW_SELECTOR)].map((row, index) => {
     const button = row.querySelector(DOWNLOAD_BUTTON_SELECTOR);
     const text = (row.innerText || '').trim();
     const meta = parseRowText(text);
@@ -125,13 +141,17 @@ function collectRows() {
       button,
       row,
     };
-  }).filter(r => r.hasDownload && r.meta);
+  }).filter(r => r.meta);
+}
+
+function collectRows() {
+  const rows = scanRows().filter(r => r.hasDownload);
   lastRows = rows;
   return rows;
 }
 
-function rowSignature(rows = collectRows()) {
-  return rows.map(r => `${r.key}|${r.meta?.meetingId || ''}|${r.meta?.dateText || ''}|${r.meta?.title || ''}`).join('||');
+function rowSignature(rows = scanRows()) {
+  return rows.map(r => `${r.key}|${r.meta?.meetingId || ''}|${r.meta?.dateText || ''}|${r.meta?.title || ''}|${r.hasDownload ? 'download' : 'missing'}`).join('||');
 }
 
 function transcriptCountText() {
@@ -214,8 +234,12 @@ function ensureLauncher() {
 function setStatus(rows) {
   const rowsEl = document.getElementById('ztd-status-rows');
   const total = transcriptCountText();
-  const shown = rows.length;
-  if (rowsEl) rowsEl.textContent = total ? `${shown}/${total} transcripts` : `${shown} transcript${shown === 1 ? '' : 's'}`;
+  const downloadable = rows.length;
+  const visibleParsed = scanRows();
+  const unavailable = Math.max(0, visibleParsed.length - downloadable);
+  const base = total ? `${downloadable}/${total} downloadable` : `${downloadable} downloadable`;
+  const suffix = unavailable ? ` (${unavailable} unavailable on this page)` : '';
+  if (rowsEl) rowsEl.textContent = `${base}${suffix}`;
 }
 
 function applyDebugVisibility() {
@@ -244,9 +268,12 @@ function updatePanelSummary() {
     return;
   }
   const pagination = getPaginationState();
+  const visibleParsed = scanRows();
+  const unavailableVisible = Math.max(0, visibleParsed.length - lastRows.length);
   out.textContent = JSON.stringify({
     url: location.href,
     visibleRows: lastRows.length,
+    visibleUnavailableRows: unavailableVisible,
     totalAvailable: transcriptCountText(),
     currentPage: pagination.currentPage,
     totalPages: pagination.totalPages,
@@ -254,7 +281,7 @@ function updatePanelSummary() {
     includeMeetingId: !!currentSettings.includeMeetingId,
     downloadedEntriesTracked: downloadManifest.length,
     perItemDelayMs: SAVE_ALL_DELAY_MS,
-    note: 'Use a clean download folder. Save all available resets to page 1 before downloading.'
+    note: 'Use a clean download folder. Save all available resets to page 1 before downloading and skips greyed-out rows with no transcript available.'
   }, null, 2);
 }
 
@@ -271,11 +298,11 @@ async function waitForRowsChange(previousSignature, timeoutMs = TRANSITION_TIMEO
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     await sleep(300);
-    const rows = collectRows();
+    const rows = scanRows();
     const sig = rowSignature(rows);
     if (sig && sig !== previousSignature) {
       await sleep(500);
-      const stableRows = collectRows();
+      const stableRows = scanRows();
       return { ok: true, rows: stableRows, signature: rowSignature(stableRows) };
     }
   }
@@ -431,7 +458,7 @@ async function gotoFirstPage() {
     seen.add(key);
     if (state.currentPage === 1) return { ok: true, page: 1 };
     if (!state.canGoPrev) {
-      const rowsNow = collectRows();
+      const rowsNow = scanRows();
       if (rowsNow.length) {
         log('Assuming page 1 because previous-page control is disabled', { currentPage: state.currentPage, rows: rowsNow.length });
         return { ok: true, page: state.currentPage || 1 };
@@ -553,7 +580,8 @@ function renderPanel(rows, settings) {
           <span id="ztd-status-rows" class="ztd-pill">0 transcripts</span>
         </div>
         <div class="ztd-header-right">
-          <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-settings">⚙</button>
+          <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-settings" title="Settings">⚙</button>
+          <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-readme-help" title="Open README help">?</button>
           <button type="button" class="ztd-secondary" id="ztd-collapse">Expand</button>
           <button type="button" class="ztd-secondary" id="ztd-close">Close</button>
         </div>
@@ -576,6 +604,9 @@ function renderPanel(rows, settings) {
 
     panel.querySelector('#ztd-close').addEventListener('click', () => { panel.remove(); ensureLauncher(); });
     panel.querySelector('#ztd-settings').addEventListener('click', async () => { const settingsModal = await populateSettingsModal(); settingsModal.hidden = false; });
+    panel.querySelector('#ztd-readme-help').addEventListener('click', () => {
+      window.open('https://github.com/outsidethebounds/Zoom_Transcript_Downloader/blob/main/README.md', '_blank', 'noopener,noreferrer');
+    });
     panel.querySelector('#ztd-collapse').addEventListener('click', event => {
       panel.classList.toggle('ztd-collapsed');
       event.currentTarget.textContent = panel.classList.contains('ztd-collapsed') ? 'Expand' : 'Collapse';
@@ -602,15 +633,21 @@ function renderPanel(rows, settings) {
     });
 
     panel.querySelector('#ztd-save-all').addEventListener('click', async () => {
-      stickyPanelMessage = null;
+      stickyPanelMessage = {
+        ok: true,
+        message: 'Download job is running.',
+        detail: 'Keep this tab open while transcripts download. You can use Stop to halt after the current item.'
+      };
       const settingsNow = await getSettings();
       currentRunId = `run-${Date.now()}`;
       downloadManifest = [];
       updatePanelSummary();
       saveAllController = { running: true, stopRequested: false };
       setSaveAllRunning(true);
+      showToast('Download job started. Keep this tab open until it finishes.', 'info', 5000);
       const results = [];
       let pagesVisited = 0;
+      let skippedUnavailable = 0;
       try {
         panel.querySelector('#ztd-output').textContent = 'Resetting to page 1 before download...';
         const reset = await gotoFirstPage();
@@ -623,24 +660,29 @@ function renderPanel(rows, settings) {
         scheduleRescan();
         const visitedSignatures = new Set();
         while (true) {
-          const rowsNow = collectRows();
-          const signature = rowSignature(rowsNow);
-          if (!rowsNow.length) {
+          const allRowsNow = scanRows();
+          const rowsNow = allRowsNow.filter(r => r.hasDownload);
+          const unavailableNow = Math.max(0, allRowsNow.length - rowsNow.length);
+          const signature = rowSignature(allRowsNow);
+          if (!allRowsNow.length) {
             panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: 'No transcript rows were found after page reset/navigation.', page: getPaginationState().currentPage }, null, 2);
             return;
           }
           if (visitedSignatures.has(signature)) {
-            panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: 'Detected duplicate page signature during pagination. Aborting to avoid looping.', pagesVisited, downloaded: downloadManifest.length }, null, 2);
+            panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: 'Detected duplicate page signature during pagination. Aborting to avoid looping.', pagesVisited, downloaded: downloadManifest.length, skippedUnavailable }, null, 2);
             return;
           }
           visitedSignatures.add(signature);
           pagesVisited += 1;
+          skippedUnavailable += unavailableNow;
           const pagination = getPaginationState();
-          log('Processing page', { page: pagination.currentPage, totalPages: pagination.totalPages, rows: rowsNow.length, pagesVisited });
-          if (!rowsNow.length) break;
+          log('Processing page', { page: pagination.currentPage, totalPages: pagination.totalPages, downloadableRows: rowsNow.length, unavailableRows: unavailableNow, pagesVisited });
+          if (!rowsNow.length) {
+            results.push({ ok: true, page: pagination.currentPage, skippedUnavailable: unavailableNow, message: unavailableNow ? 'No downloadable transcripts on this page; skipped greyed-out rows.' : 'No downloadable transcripts on this page.' });
+          }
           for (let i = 0; i < rowsNow.length; i++) {
             if (saveAllController.stopRequested) {
-              results.push({ stopped: true, page: pagination.currentPage, processed: downloadManifest.length });
+              results.push({ stopped: true, page: pagination.currentPage, processed: downloadManifest.length, skippedUnavailable });
               panel.querySelector('#ztd-output').textContent = JSON.stringify(results, null, 2);
               return;
             }
@@ -655,13 +697,17 @@ function renderPanel(rows, settings) {
         saveAllController.running = false;
         setSaveAllRunning(false);
       }
-      panel.querySelector('#ztd-output').textContent = JSON.stringify({ pagesVisited, downloaded: downloadManifest.length, results }, null, 2);
+      stickyPanelMessage = null;
+      panel.querySelector('#ztd-output').textContent = JSON.stringify({ pagesVisited, downloaded: downloadManifest.length, skippedUnavailable, results }, null, 2);
+      showToast(`Download job finished. Downloaded ${downloadManifest.length} transcript${downloadManifest.length === 1 ? '' : 's'}.`, 'success', 5000);
     });
 
     panel.querySelector('#ztd-stop-save-all').addEventListener('click', () => {
       if (saveAllController.running) {
         saveAllController.stopRequested = true;
-        panel.querySelector('#ztd-output').textContent = 'Stop requested. Will halt after the current download trigger.';
+        stickyPanelMessage = 'Stop requested. Will halt after the current download trigger.';
+        panel.querySelector('#ztd-output').textContent = stickyPanelMessage;
+        showToast('Stop requested. The job will halt after the current item.', 'warn', 4000);
       }
     });
   }

@@ -1,6 +1,6 @@
 # Zoom Transcript Downloader — User Guide
 
-Version: 1.4.5
+Version: 1.5.4
 
 ## What this extension does
 
@@ -44,7 +44,9 @@ Click **Save all available**.
 
 The extension should:
 - reset to page 1 first
+- show a visible in-page notification that the download job is running
 - download transcript files from all available pages
+- skip greyed-out transcript rows that are unavailable
 - stop with a clear error if page-1 reset fails
 
 ### 2. Generate the rename kit
@@ -63,6 +65,8 @@ Open the gear icon to set:
 - **Filename pattern**
 - **Target OS**
 - whether to include **meeting ID** in every filename
+
+Use the **`?`** button next to the gear to open the GitHub README in a new browser window.
 
 ### Default filename format
 Default:
@@ -134,4 +138,4 @@ chmod +x rename_zoom_transcripts.sh
 
 This guide was written for:
 
-**Zoom Transcript Downloader v1.4.1**
+**Zoom Transcript Downloader v1.5.4**

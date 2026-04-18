@@ -102,3 +102,27 @@
 - **Consequences:**
   - less packaging overhead
   - still acceptable to rely on unpacked-extension workflow
+
+## 13. Treat unavailable transcript rows as first-class UI state
+- **Session context:** Release hardening / bug-fix pass
+- **Status:** Active
+- **Decision:** Count greyed-out transcript rows separately and tell the user when rows are unavailable instead of pretending the page has fewer rows.
+- **Consequences:**
+  - clearer user expectations during save-all runs
+  - less confusion when some meetings have no transcript available
+
+## 14. Accept both `1 day` and `N days` in row parsing
+- **Session context:** Real-world pagination bug fix on live Zoom data
+- **Status:** Active
+- **Decision:** Row parser must accept both singular and plural age text from Zoom transcript listings.
+- **Consequences:**
+  - avoids dropping last-page rows that say `1 day`
+  - protected by the local logic regression test
+
+## 15. Show lightweight in-page job notifications for save-all runs
+- **Session context:** UX polish pass
+- **Status:** Active
+- **Decision:** Show a visible running-job message/toast when bulk download begins and a completion/stop notification afterward.
+- **Consequences:**
+  - users get immediate feedback that the job is active
+  - slightly more UI state to maintain
