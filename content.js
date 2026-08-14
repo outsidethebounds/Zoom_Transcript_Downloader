@@ -16,6 +16,7 @@ let downloadManifest = [];
 let rescanTimer = null;
 let currentRunId = null;
 let stickyPanelMessage = null;
+let currentDownloadFolderName = null;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -69,6 +70,14 @@ function sampleMeta() {
     meetingId: '12345678901',
     dateText: 'Apr 4, 2026 9:30 AM',
   };
+}
+
+function getDownloadFolderName() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const year = now.getFullYear();
+  return `ZoomTranscripts-${month}${day}${year}`;
 }
 
 function dateParts(dateText) {
@@ -208,6 +217,7 @@ async function getSettings() { return await chrome.runtime.sendMessage({ type: `
 async function setSettings(settings) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:setSettings`, settings }); }
 async function getLatestDownloadId() { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:getLatestDownloadId` }); }
 async function waitForObservedDownload(payload) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:waitForObservedDownload`, payload }); }
+async function startDownloadBatch(payload) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:startDownloadBatch`, payload }); }
 
 function installPageHook() {
   if (window.__ztdInjectedScript) return;
@@ -633,18 +643,21 @@ function renderPanel(rows, settings) {
     });
 
     panel.querySelector('#ztd-save-all').addEventListener('click', async () => {
+      currentDownloadFolderName = getDownloadFolderName();
       stickyPanelMessage = {
         ok: true,
         message: 'Download job is running.',
-        detail: 'Keep this tab open while transcripts download. You can use Stop to halt after the current item.'
+        detail: 'Keep this tab open while transcripts download. You can use Stop to halt after the current item.',
+        folderName: currentDownloadFolderName
       };
       const settingsNow = await getSettings();
       currentRunId = `run-${Date.now()}`;
+      await startDownloadBatch({ runId: currentRunId, folderName: currentDownloadFolderName });
       downloadManifest = [];
       updatePanelSummary();
       saveAllController = { running: true, stopRequested: false };
       setSaveAllRunning(true);
-      showToast('Download job started. Keep this tab open until it finishes.', 'info', 5000);
+      showToast(`Download job started. Files will be saved in Downloads/${currentDownloadFolderName}.`, 'info', 5000);
       const results = [];
       let pagesVisited = 0;
       let skippedUnavailable = 0;

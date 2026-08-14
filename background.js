@@ -6,6 +6,7 @@ const BASE_DEFAULTS = {
 
 const ACTIVE_HOST_RE = /^https:\/\/(?:[^/]+\.)?zoom\.us\/recording\/meeting\/transcript/i;
 const observedDownloads = [];
+let activeBatchFolderName = null;
 
 async function inferDefaultOs() {
   try {
@@ -19,6 +20,22 @@ async function inferDefaultOs() {
 function basename(filePath = '') {
   const parts = String(filePath).split(/[\\/]/);
   return parts[parts.length - 1] || filePath;
+}
+
+function getBatchDownloadPath(originalFilename = '') {
+  const cleanName = basename(originalFilename);
+  if (!activeBatchFolderName) return cleanName;
+  return `${activeBatchFolderName}/${cleanName}`;
+}
+
+function looksLikeZoomTranscriptDownload(item) {
+  const haystack = [
+    item?.url || '',
+    item?.finalUrl || '',
+    item?.referrer || '',
+    item?.filename || '',
+  ].join(' ');
+  return /zoom/i.test(haystack) && /transcript|download/i.test(haystack);
 }
 
 function recordDownload(item) {
@@ -47,6 +64,17 @@ chrome.downloads.onChanged.addListener(delta => {
   if (delta.state?.current) {
     found.state = delta.state.current;
   }
+});
+
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  if (!activeBatchFolderName || !looksLikeZoomTranscriptDownload(item)) {
+    suggest();
+    return;
+  }
+  suggest({
+    filename: getBatchDownloadPath(item.filename || item.finalUrl || item.url || ''),
+    conflictAction: 'uniquify',
+  });
 });
 
 async function waitForObservedDownload({ afterId = 0, timeoutMs = 20000 }) {
@@ -131,12 +159,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch(error => sendResponse({ ok: false, error: String(error) }));
     return true;
   }
+  if (message?.type === 'zoomTranscriptExtension:startDownloadBatch') {
+    activeBatchFolderName = message.payload?.folderName || null;
+    sendResponse({ ok: true, folderName: activeBatchFolderName });
+    return false;
+  }
   if (message?.type === 'zoomTranscriptExtension:downloadArtifact') {
     const { filename, content, mimeType } = message.payload || {};
     const url = makeDataUrl(content || '', mimeType || 'text/plain;charset=utf-8');
-    chrome.downloads.download({ url, filename, saveAs: true, conflictAction: 'uniquify' })
-      .then(downloadId => sendResponse({ ok: true, downloadId, filename }))
-      .catch(error => sendResponse({ ok: false, error: String(error), filename }));
+    const downloadFilename = getBatchDownloadPath(filename || '');
+    chrome.downloads.download({ url, filename: downloadFilename, saveAs: false, conflictAction: 'uniquify' })
+      .then(downloadId => sendResponse({ ok: true, downloadId, filename: downloadFilename }))
+      .catch(error => sendResponse({ ok: false, error: String(error), filename: downloadFilename }));
     return true;
   }
 });
