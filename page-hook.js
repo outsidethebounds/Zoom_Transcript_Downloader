@@ -1,6 +1,16 @@
 (() => {
   if (window.__ztdPageHookInstalled) return;
   window.__ztdPageHookInstalled = true;
+  let suppressNativeDownloads = false;
+
+  window.addEventListener('message', event => {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (data?.source !== 'zoomTranscriptExtension') return;
+    if (data?.type === 'set-native-download-suppression') {
+      suppressNativeDownloads = !!data.enabled;
+    }
+  });
 
   const postPayload = async (response, url) => {
     try {
@@ -13,6 +23,7 @@
         payload: {
           url,
           contentType: response.headers.get('content-type') || '',
+          contentDisposition: response.headers.get('content-disposition') || '',
           text,
         },
       }, '*');
@@ -51,6 +62,7 @@
           payload: {
             url: requestUrl,
             contentType: xhr.getResponseHeader('content-type') || '',
+            contentDisposition: xhr.getResponseHeader('content-disposition') || '',
             text,
           },
         }, '*');
@@ -65,4 +77,23 @@
   PatchedXHR.DONE = OriginalXHR.DONE;
   PatchedXHR.prototype = OriginalXHR.prototype;
   window.XMLHttpRequest = PatchedXHR;
+
+  const originalAnchorClick = window.HTMLAnchorElement?.prototype?.click;
+  if (originalAnchorClick) {
+    window.HTMLAnchorElement.prototype.click = function(...args) {
+      const href = this.getAttribute('href') || this.href || '';
+      if (suppressNativeDownloads && (this.hasAttribute('download') || /^blob:|^data:/i.test(href))) {
+        return;
+      }
+      return originalAnchorClick.apply(this, args);
+    };
+  }
+
+  const originalWindowOpen = window.open.bind(window);
+  window.open = function(url, ...rest) {
+    if (suppressNativeDownloads && typeof url === 'string' && /^blob:|^data:/i.test(url)) {
+      return null;
+    }
+    return originalWindowOpen(url, ...rest);
+  };
 })();
