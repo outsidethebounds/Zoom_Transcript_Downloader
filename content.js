@@ -17,8 +17,6 @@ let rescanTimer = null;
 let currentRunId = null;
 let stickyPanelMessage = null;
 let currentDownloadFolderName = null;
-const transcriptResponseQueue = [];
-const transcriptResponseWaiters = [];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -176,78 +174,6 @@ function basename(filePath = '') {
   return parts[parts.length - 1] || filePath;
 }
 
-function setNativeDownloadSuppression(enabled) {
-  window.postMessage({
-    source: EXTENSION_NS,
-    type: 'set-native-download-suppression',
-    enabled: !!enabled,
-  }, '*');
-}
-
-function dequeueTranscriptResponse() {
-  return transcriptResponseQueue.length ? transcriptResponseQueue.shift() : null;
-}
-
-function queueTranscriptResponse(payload) {
-  const waiter = transcriptResponseWaiters.shift();
-  if (waiter) {
-    waiter.resolve(payload);
-    return;
-  }
-  transcriptResponseQueue.push(payload);
-}
-
-function waitForTranscriptResponse(timeoutMs = 20000) {
-  const queued = dequeueTranscriptResponse();
-  if (queued) return Promise.resolve(queued);
-  return new Promise((resolve, reject) => {
-    const waiter = {
-      resolve: payload => {
-        clearTimeout(timer);
-        resolve(payload);
-      },
-    };
-    const timer = setTimeout(() => {
-      const index = transcriptResponseWaiters.indexOf(waiter);
-      if (index >= 0) transcriptResponseWaiters.splice(index, 1);
-      reject(new Error('Timed out while waiting for transcript data from Zoom.'));
-    }, timeoutMs);
-    transcriptResponseWaiters.push(waiter);
-  });
-}
-
-function filenameFromContentDisposition(header = '') {
-  const utf8Match = header.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
-  if (utf8Match) {
-    try {
-      return basename(decodeURIComponent(utf8Match[1].trim()));
-    } catch {}
-  }
-  const quotedMatch = header.match(/filename\s*=\s*"([^"]+)"/i);
-  if (quotedMatch) return basename(quotedMatch[1].trim());
-  const bareMatch = header.match(/filename\s*=\s*([^;]+)/i);
-  if (bareMatch) return basename(bareMatch[1].trim());
-  return '';
-}
-
-function filenameFromUrl(url = '') {
-  try {
-    const parsed = new URL(url, location.href);
-    const name = basename(parsed.pathname);
-    return /\.[a-z0-9]+$/i.test(name) ? name : '';
-  } catch {
-    return '';
-  }
-}
-
-function resolveTranscriptFilename(payload, item) {
-  const fromHeader = filenameFromContentDisposition(payload?.contentDisposition || '');
-  if (fromHeader) return fromHeader;
-  const fromUrl = filenameFromUrl(payload?.url || '');
-  if (fromUrl) return fromUrl;
-  return `${sanitizeTitle(item.meta.title)} - ${item.meta.meetingId || 'transcript'}.txt`;
-}
-
 function currentPageButton() {
   return document.querySelector('button[aria-current="page"], button[aria-current="true"], [role="button"][aria-current="page"]');
 }
@@ -292,13 +218,6 @@ async function setSettings(settings) { return await chrome.runtime.sendMessage({
 async function getLatestDownloadId() { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:getLatestDownloadId` }); }
 async function waitForObservedDownload(payload) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:waitForObservedDownload`, payload }); }
 async function startDownloadBatch(payload) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:startDownloadBatch`, payload }); }
-
-window.addEventListener('message', event => {
-  if (event.source !== window) return;
-  const data = event.data;
-  if (data?.source !== 'zoom-transcript-extension' || data?.type !== 'transcript-response') return;
-  queueTranscriptResponse(data.payload || {});
-});
 
 function installPageHook() {
   if (window.__ztdInjectedScript) return;
@@ -509,24 +428,10 @@ async function populateSettingsModal() {
 }
 
 async function triggerZoomDownload(item, settings) {
-  log('Waiting for transcript data from Zoom', { title: item.meta.title, meetingId: item.meta.meetingId });
-  setNativeDownloadSuppression(true);
-  let payload;
-  try {
-    item.button.click();
-    payload = await waitForTranscriptResponse(20000);
-  } finally {
-    setNativeDownloadSuppression(false);
-  }
-  const originalFilename = resolveTranscriptFilename(payload, item);
-  const downloadResult = await chrome.runtime.sendMessage({
-    type: `${EXTENSION_NS}:downloadArtifact`,
-    payload: {
-      filename: originalFilename,
-      content: payload?.text || '',
-      mimeType: 'text/plain;charset=utf-8',
-    }
-  });
+  const marker = await getLatestDownloadId();
+  log('Waiting for observed browser download', { afterId: marker?.maxId || 0, title: item.meta.title });
+  item.button.click();
+  const observed = await waitForObservedDownload({ afterId: marker?.maxId || 0, timeoutMs: 20000 });
   const normalized = normalizeMeta(item.meta);
   const entry = {
     runId: currentRunId,
@@ -535,20 +440,20 @@ async function triggerZoomDownload(item, settings) {
     dateText: item.meta.dateText,
     page: getPaginationState().currentPage,
     rowKey: item.key,
-    sourceFilename: basename(downloadResult?.filename || originalFilename) || null,
-    sourcePath: downloadResult?.filename || null,
-    observedDownloadId: downloadResult?.downloadId || null,
+    sourceFilename: observed?.download?.basename || null,
+    sourcePath: observed?.download?.filename || null,
+    observedDownloadId: observed?.download?.id || null,
     targetBase: buildTargetBase(item.meta, settings),
     ...normalized,
   };
   downloadManifest.push(entry);
   updatePanelSummary();
-  log('Triggered extension-owned transcript download', entry);
+  log('Triggered Zoom browser download', entry);
   if (!entry.sourceFilename) {
-    log('Failed to save transcript through extension download path', { title: entry.title, meetingId: entry.meetingId, page: entry.page });
-    return { ok: false, error: 'Could not save the transcript through the extension download path.', entry };
+    log('Failed to observe browser download for transcript', { title: entry.title, meetingId: entry.meetingId, page: entry.page });
+    return { ok: false, error: 'Could not observe the downloaded file in the browser. Rename kit would be unreliable.', entry };
   }
-  return { ok: !!downloadResult?.ok, browserDownloadTriggered: false, sourceFilename: entry.sourceFilename, targetBase: entry.targetBase };
+  return { ok: true, browserDownloadTriggered: true, sourceFilename: entry.sourceFilename, targetBase: entry.targetBase };
 }
 
 async function gotoFirstPage() {
