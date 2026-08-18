@@ -7,8 +7,6 @@ const {
   buildTargetBase,
   applyCollisionSafeFilenames,
   parseRowText,
-  generateMacScript,
-  generatePowerShellScript,
 } = core;
 
 function run() {
@@ -49,18 +47,6 @@ function run() {
     meetingId: '12345678901',
     dateText: 'Apr 18, 2026 7:01 AM',
   });
-
-  const macScript = generateMacScript([
-    { sourceFilename: 'source.txt', targetFilename: 'target.txt' },
-  ]);
-  assert.match(macScript, /Renamed source\.txt -> target\.txt/);
-  assert.match(macScript, /Done\. Renamed: \$renamed/);
-
-  const psScript = generatePowerShellScript([
-    { sourceFilename: 'source.txt', targetFilename: 'target.txt' },
-  ]);
-  assert.match(psScript, /Rename-Item -LiteralPath "source\.txt" -NewName "target\.txt"/);
-  assert.match(psScript, /Done\. Renamed: \$renamed/);
 
   console.log('logic.test.mjs: all tests passed');
 }

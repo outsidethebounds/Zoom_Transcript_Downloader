@@ -12,7 +12,7 @@ High-level responsibilities:
 5. save transcript files directly with final filenames
 6. share pure parsing and page logic through small browser-safe libraries
 
-This is a browser-only architecture. Earlier helper-based and rename-script-based designs are no longer the primary workflow.
+This is a browser-only architecture. Earlier helper-based and rename-script-based designs have been removed from the active repo.
 
 ## Main components / modules
 
@@ -68,9 +68,6 @@ Intercepts page `fetch` and `XMLHttpRequest` calls that look transcript-related 
 
 ### `content.css`
 Styles injected panel and modals.
-
-### `popup.html` / `popup.js`
-Legacy popup-era artifacts. Current UX is page-panel driven.
 
 ## Data flow
 
@@ -137,4 +134,4 @@ Core APIs used:
 - `content.js` is slimmer than before, but it is still the main orchestrator and could be split further later.
 - Pagination remains the highest runtime risk.
 - `page-hook.js` is now part of the critical path.
-- Legacy popup files remain and may be removable after stabilization.
+- Legacy popup-era and helper-era files have been removed so the repo matches the current shipped architecture.

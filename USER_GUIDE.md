@@ -57,7 +57,7 @@ Open the gear icon to set:
 - **Save folder inside Downloads**
 - whether to include **meeting ID** in every filename
 
-Use the **`?`** button next to the gear to open the GitHub README in a new browser window.
+Use the **`?`** button in the panel header to open the About window with creator/contact details and the GitHub repo link.
 
 ### Default filename format
 Default:

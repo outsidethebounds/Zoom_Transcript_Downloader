@@ -4,21 +4,22 @@
 - **Session context:** This session
 - **Status:** Active
 - **Context:** Helper-based designs were brittle and complicated for end users.
-- **Decision:** Browser-only workflow plus rename kit.
+- **Decision:** Browser-only workflow with direct-save downloads inside the extension.
 - **Consequences:**
   - simpler install/runtime
   - no local service to maintain
   - browser/download behavior becomes the core dependency
+  - background download handling is now part of the critical path
 
-## 2. Generate rename scripts instead of writing files directly from the extension
-- **Session context:** This session
+## 2. Save transcript content directly with final filenames
+- **Session context:** Release `2026.08`
 - **Status:** Active
-- **Context:** Chrome extensions are bad at deterministic local disk writes and post-download renames.
-- **Decision:** Generate manifest JSON + OS-specific script.
+- **Context:** Rename-script workflows left stale artifacts, extra user steps, and confusing filename behavior.
+- **Decision:** Capture transcript content from the Zoom page and save extension-owned files directly with the final filename.
 - **Consequences:**
-  - extra manual step for user
-  - simpler extension architecture
-  - requires good user instructions
+  - no post-run rename step
+  - fewer stale repo artifacts
+  - more dependence on the page hook and native-download suppression timing
 
 ## 3. Use Zoom’s own download buttons
 - **Session context:** This session
@@ -66,18 +67,8 @@
 - **Status:** Active
 - **Decision:** Product documentation and workflow assume a clean transcript download folder.
 - **Consequences:**
-  - simpler, safer rename process
+  - simpler, safer bulk-save runs
   - user must manage download folder hygiene
-
-## 9. Replace order-based rename matching with exact observed source filenames
-- **Session context:** This session, after recognizing order-based matching was unacceptable for GA
-- **Status:** Active
-- **Context:** Renaming by mtime/order was too brittle.
-- **Decision:** Observe actual browser downloads in `background.js`, store exact source filenames in `downloadManifest`, and generate scripts that rename those exact filenames.
-- **Consequences:**
-  - much safer rename behavior
-  - depends on successful Chrome download observation
-  - if download observation fails, rename-kit generation should refuse to guess
 
 ## 10. Keep debug mode, but behind a toggle
 - **Session context:** User specified in this session
