@@ -1,5 +1,6 @@
 const BASE_DEFAULTS = {
   filenamePattern: '{date} - {time} - {title}',
+  downloadSubfolder: '',
   targetOs: 'macos',
   includeMeetingId: false,
 };
@@ -7,6 +8,9 @@ const BASE_DEFAULTS = {
 const ACTIVE_HOST_RE = /^https:\/\/(?:[^/]+\.)?zoom\.us\/recording\/meeting\/transcript/i;
 const observedDownloads = [];
 let activeBatchFolderName = null;
+let activeBatchMode = 'legacy';
+const suppressedDownloadIds = new Set();
+const pendingExtensionOwnedFilenames = [];
 
 async function inferDefaultOs() {
   try {
@@ -38,6 +42,24 @@ function looksLikeZoomTranscriptDownload(item) {
   return /zoom/i.test(haystack) && /transcript|download/i.test(haystack);
 }
 
+function isExtensionOwnedDownload(item) {
+  const url = String(item?.url || '');
+  return url.startsWith('data:text/plain') || url.startsWith('data:application/json') || url.startsWith('data:application/');
+}
+
+function shouldSuppressNativeZoomDownload(item) {
+  if (activeBatchMode !== 'direct-save') return false;
+  if (isExtensionOwnedDownload(item)) return false;
+  const haystack = [
+    item?.url || '',
+    item?.finalUrl || '',
+    item?.referrer || '',
+    item?.filename || '',
+    item?.mime || '',
+  ].join(' ');
+  return /zoom|blob:/i.test(haystack) && /transcript|download|plain|text|txt/i.test(haystack);
+}
+
 function recordDownload(item) {
   observedDownloads.push({
     id: item.id,
@@ -52,6 +74,10 @@ function recordDownload(item) {
 
 chrome.downloads.onCreated.addListener(item => {
   recordDownload(item);
+  if (shouldSuppressNativeZoomDownload(item)) {
+    suppressedDownloadIds.add(item.id);
+    chrome.downloads.cancel(item.id).catch(() => {});
+  }
 });
 
 chrome.downloads.onChanged.addListener(delta => {
@@ -64,9 +90,24 @@ chrome.downloads.onChanged.addListener(delta => {
   if (delta.state?.current) {
     found.state = delta.state.current;
   }
+  if (suppressedDownloadIds.has(delta.id) && (delta.state?.current === 'complete' || delta.state?.current === 'interrupted')) {
+    chrome.downloads.removeFile(delta.id).catch(() => {});
+    chrome.downloads.erase({ id: delta.id }).catch(() => {});
+    suppressedDownloadIds.delete(delta.id);
+  }
 });
 
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  if (isExtensionOwnedDownload(item)) {
+    const hintedFilename = pendingExtensionOwnedFilenames.shift();
+    if (hintedFilename) {
+      suggest({
+        filename: hintedFilename,
+        conflictAction: 'uniquify',
+      });
+      return;
+    }
+  }
   if (!activeBatchFolderName || !looksLikeZoomTranscriptDownload(item)) {
     suggest();
     return;
@@ -161,16 +202,42 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === 'zoomTranscriptExtension:startDownloadBatch') {
     activeBatchFolderName = message.payload?.folderName || null;
-    sendResponse({ ok: true, folderName: activeBatchFolderName });
+    activeBatchMode = message.payload?.mode || 'legacy';
+    sendResponse({ ok: true, folderName: activeBatchFolderName, mode: activeBatchMode });
+    return false;
+  }
+  if (message?.type === 'zoomTranscriptExtension:finishDownloadBatch') {
+    activeBatchFolderName = null;
+    activeBatchMode = 'legacy';
+    suppressedDownloadIds.clear();
+    pendingExtensionOwnedFilenames.length = 0;
+    sendResponse({ ok: true });
     return false;
   }
   if (message?.type === 'zoomTranscriptExtension:downloadArtifact') {
     const { filename, content, mimeType } = message.payload || {};
     const url = makeDataUrl(content || '', mimeType || 'text/plain;charset=utf-8');
     const downloadFilename = getBatchDownloadPath(filename || '');
+    pendingExtensionOwnedFilenames.push(downloadFilename);
     chrome.downloads.download({ url, filename: downloadFilename, saveAs: false, conflictAction: 'uniquify' })
       .then(downloadId => sendResponse({ ok: true, downloadId, filename: downloadFilename }))
-      .catch(error => sendResponse({ ok: false, error: String(error), filename: downloadFilename }));
+      .catch(error => {
+        pendingExtensionOwnedFilenames.pop();
+        sendResponse({ ok: false, error: String(error), filename: downloadFilename });
+      });
+    return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:saveTranscript') {
+    const { filename, content, mimeType } = message.payload || {};
+    const url = makeDataUrl(content || '', mimeType || 'text/plain;charset=utf-8');
+    const downloadFilename = getBatchDownloadPath(filename || '');
+    pendingExtensionOwnedFilenames.push(downloadFilename);
+    chrome.downloads.download({ url, filename: downloadFilename, saveAs: false, conflictAction: 'uniquify' })
+      .then(downloadId => sendResponse({ ok: true, downloadId, filename: downloadFilename }))
+      .catch(error => {
+        pendingExtensionOwnedFilenames.pop();
+        sendResponse({ ok: false, error: String(error), filename: downloadFilename });
+      });
     return true;
   }
 });

@@ -3,10 +3,32 @@ const PANEL_ID = 'ztd-panel';
 const LAUNCHER_ID = 'ztd-launcher';
 const SETTINGS_MODAL_ID = 'ztd-settings-modal';
 const PATTERN_HELP_MODAL_ID = 'ztd-pattern-help-modal';
+const ABOUT_MODAL_ID = 'ztd-about-modal';
 const ROW_SELECTOR = 'tr.zoom-virtual-table__row';
 const DOWNLOAD_BUTTON_SELECTOR = 'button[aria-label^="Download "]';
 const SAVE_ALL_DELAY_MS = 600;
 const TRANSITION_TIMEOUT_MS = 30000;
+
+const {
+  parseRowText,
+  normalizeMeta,
+  buildTargetBase,
+  applyCollisionSafeFilenames,
+} = globalThis.ZTDCore || {};
+
+const {
+  buildDownloadFolderPath,
+  sanitizeRelativeFolder,
+  scanRows: scanTranscriptRows,
+  rowSignature: buildRowSignature,
+  transcriptCountText: readTranscriptCount,
+  getPaginationState: readPaginationState,
+  waitForRowsChange: waitForPageRowsChange,
+  gotoFirstPage: navigateToFirstPage,
+  gotoNextPage: navigateToNextPage,
+} = globalThis.ZTDPage || {};
+
+const runtime = globalThis.ZTDRuntime?.createClient(EXTENSION_NS);
 
 let lastRows = [];
 let logLines = [];
@@ -17,8 +39,19 @@ let rescanTimer = null;
 let currentRunId = null;
 let stickyPanelMessage = null;
 let currentDownloadFolderName = null;
+let pendingTranscriptWaiters = [];
+let transcriptResponseQueue = [];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
 
 function showToast(message, kind = 'info', timeoutMs = 3500) {
   let toast = document.getElementById('ztd-toast');
@@ -45,23 +78,19 @@ function log(message, extra) {
   console.log('[ZTD]', message, extra || '');
 }
 
-function sanitizeTitle(title) {
-  return (title || '')
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[ .]+$/g, '') || 'Untitled Meeting';
+function setOutput(value) {
+  const out = document.getElementById('ztd-output');
+  if (!out) return;
+  out.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 }
 
-function parseRowText(text) {
-  const compact = (text || '').replace(/\s+/g, ' ').trim();
-  const match = compact.match(/^(.*?)\s+(\d{3}\s\d{4}\s\d{4})\s+\S+@\S+\s+([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}\s+\d{1,2}:\d{2}\s+[AP]M)\s+\d+\s+day(?:s)?\s+Download\s+Delete$/);
-  if (!match) return null;
-  return {
-    title: match[1].trim(),
-    meetingId: match[2].replace(/\s+/g, ''),
-    dateText: match[3].trim(),
+function debugCheckpoint(message, extra) {
+  log(message, extra);
+  stickyPanelMessage = {
+    checkpoint: message,
+    ...(extra && typeof extra === 'object' ? extra : extra ? { detail: String(extra) } : {}),
   };
+  setOutput(stickyPanelMessage);
 }
 
 function sampleMeta() {
@@ -72,85 +101,29 @@ function sampleMeta() {
   };
 }
 
-function getDownloadFolderName() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const year = now.getFullYear();
-  return `ZoomTranscripts-${month}${day}${year}`;
+function currentPattern(modal) {
+  return modal.querySelector('#ztd-settings-pattern').value || '{date} - {time} - {title}';
 }
 
-function dateParts(dateText) {
-  const d = new Date(dateText);
-  if (Number.isNaN(d.getTime())) return { date: 'unknown-date', time: 'unknown-time' };
-  return {
-    date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-    time: `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`,
+function currentDownloadSubfolder(modal) {
+  return sanitizeRelativeFolder(modal.querySelector('#ztd-settings-subfolder').value || '');
+}
+
+function renderSettingsPreview(modal) {
+  const settings = {
+    filenamePattern: currentPattern(modal),
+    includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked,
   };
-}
-
-function normalizeMeta(meta) {
-  const { date, time } = dateParts(meta.dateText || '');
-  return {
-    normalizedTitle: sanitizeTitle(meta.title || '').toLowerCase(),
-    dateISO: date,
-    timeHHMM: time,
-  };
-}
-
-function buildTargetBase(meta, settings) {
-  const { date, time } = dateParts(meta.dateText);
-  let base = (settings.filenamePattern || '{date} - {time} - {title}')
-    .replaceAll('{date}', date)
-    .replaceAll('{time}', time)
-    .replaceAll('{title}', sanitizeTitle(meta.title))
-    .replaceAll('{meetingId}', meta.meetingId || '');
-  base = base.replace(/\s+/g, ' ').trim();
-  if (settings.includeMeetingId && meta.meetingId && !base.includes(meta.meetingId)) {
-    base = `${base} - ${meta.meetingId}`;
-  }
-  return base;
-}
-
-function applyCollisionSafeFilenames(entries, settings) {
-  const seen = new Map();
-  return entries.map(entry => {
-    const key = entry.targetBase.toLowerCase();
-    const count = seen.get(key) || 0;
-    seen.set(key, count + 1);
-    let finalBase = entry.targetBase;
-    if (count > 0 || entries.filter(e => e.targetBase.toLowerCase() === key).length > 1) {
-      if (entry.meetingId && !finalBase.includes(entry.meetingId)) {
-        finalBase = `${entry.targetBase} - ${entry.meetingId}`;
-      }
-    }
-    return { ...entry, targetFilename: `${finalBase}.txt` };
-  });
-}
-
-function isEnabledDownloadButton(button) {
-  if (!button) return false;
-  if (button.disabled) return false;
-  if (button.getAttribute('aria-disabled') === 'true') return false;
-  if ((button.className || '').includes('is-secondary-disabled')) return false;
-  return true;
+  modal.querySelector('#ztd-pattern-example').textContent = `${buildTargetBase(sampleMeta(), settings)}.txt`;
+  modal.querySelector('#ztd-settings-folder-example').textContent = `Downloads/${buildDownloadFolderPath(currentDownloadSubfolder(modal))}`;
 }
 
 function scanRows() {
-  return [...document.querySelectorAll(ROW_SELECTOR)].map((row, index) => {
-    const button = row.querySelector(DOWNLOAD_BUTTON_SELECTOR);
-    const text = (row.innerText || '').trim();
-    const meta = parseRowText(text);
-    return {
-      index,
-      key: row.getAttribute('data-key') || '',
-      text,
-      meta,
-      hasDownload: isEnabledDownloadButton(button),
-      button,
-      row,
-    };
-  }).filter(r => r.meta);
+  return scanTranscriptRows({
+    rowSelector: ROW_SELECTOR,
+    downloadButtonSelector: DOWNLOAD_BUTTON_SELECTOR,
+    parseRowText,
+  });
 }
 
 function collectRows() {
@@ -160,64 +133,22 @@ function collectRows() {
 }
 
 function rowSignature(rows = scanRows()) {
-  return rows.map(r => `${r.key}|${r.meta?.meetingId || ''}|${r.meta?.dateText || ''}|${r.meta?.title || ''}|${r.hasDownload ? 'download' : 'missing'}`).join('||');
+  return buildRowSignature(rows);
 }
 
 function transcriptCountText() {
-  const body = document.body.innerText || '';
-  const m = body.match(/(\d+)\s+result\(s\)/i);
-  return m ? Number(m[1]) : null;
-}
-
-function basename(filePath = '') {
-  const parts = String(filePath).split(/[\\/]/);
-  return parts[parts.length - 1] || filePath;
-}
-
-function currentPageButton() {
-  return document.querySelector('button[aria-current="page"], button[aria-current="true"], [role="button"][aria-current="page"]');
-}
-
-function inferPageNumberFromButton(button) {
-  const text = (button?.textContent || '').trim();
-  return /^\d+$/.test(text) ? Number(text) : null;
-}
-
-function findPrevPageButton() {
-  return document.querySelector('button.btn-prev[aria-label="Previous page"][aria-disabled="false"]')
-    || document.querySelector('button.btn-prev[aria-label="Previous page"]:not([aria-disabled="true"])');
-}
-
-function findNextPageButton() {
-  return document.querySelector('button.btn-next[aria-label="Next page"][aria-disabled="false"]')
-    || document.querySelector('button.btn-next[aria-label="Next page"]:not([aria-disabled="true"])');
+  return readTranscriptCount(document);
 }
 
 function getPaginationState() {
-  const currentButton = currentPageButton();
-  const currentPage = inferPageNumberFromButton(currentButton);
-  const pageButtons = [...document.querySelectorAll('button')]
-    .map(b => (b.textContent || '').trim())
-    .filter(t => /^\d+$/.test(t))
-    .map(Number);
-  const totalPages = pageButtons.length ? Math.max(...pageButtons) : null;
-  const prevButton = findPrevPageButton();
-  const nextButton = findNextPageButton();
-  return {
-    currentPage,
-    totalPages,
-    prevButton,
-    nextButton,
-    canGoPrev: !!prevButton && prevButton.getAttribute('aria-disabled') !== 'true' && !prevButton.disabled,
-    canGoNext: !!nextButton && nextButton.getAttribute('aria-disabled') !== 'true' && !nextButton.disabled,
-  };
+  return readPaginationState(document);
 }
 
-async function getSettings() { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:getSettings` }); }
-async function setSettings(settings) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:setSettings`, settings }); }
-async function getLatestDownloadId() { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:getLatestDownloadId` }); }
-async function waitForObservedDownload(payload) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:waitForObservedDownload`, payload }); }
-async function startDownloadBatch(payload) { return await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:startDownloadBatch`, payload }); }
+async function getSettings() { return await runtime.getSettings(); }
+async function setSettings(settings) { return await runtime.setSettings(settings); }
+async function startDownloadBatch(payload) { return await runtime.startDownloadBatch(payload); }
+async function finishDownloadBatch(payload) { return await runtime.finishDownloadBatch(payload); }
+async function saveTranscript(payload) { return await runtime.saveTranscript(payload); }
 
 function installPageHook() {
   if (window.__ztdInjectedScript) return;
@@ -226,6 +157,63 @@ function installPageHook() {
   script.src = chrome.runtime.getURL('page-hook.js');
   script.onload = () => script.remove();
   (document.head || document.documentElement).appendChild(script);
+}
+
+function clearTranscriptResponseQueue() {
+  transcriptResponseQueue = [];
+}
+
+function flushPendingTranscriptWaiters(error) {
+  const waiters = pendingTranscriptWaiters.slice();
+  pendingTranscriptWaiters = [];
+  waiters.forEach(waiter => {
+    clearTimeout(waiter.timer);
+    waiter.reject(error);
+  });
+}
+
+function waitForTranscriptResponse(timeoutMs = 20000) {
+  if (transcriptResponseQueue.length) {
+    return Promise.resolve(transcriptResponseQueue.shift());
+  }
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      resolve(value) {
+        clearTimeout(waiter.timer);
+        resolve(value);
+      },
+      reject(error) {
+        clearTimeout(waiter.timer);
+        reject(error);
+      },
+      timer: setTimeout(() => {
+        pendingTranscriptWaiters = pendingTranscriptWaiters.filter(item => item !== waiter);
+        reject(new Error('Timed out while waiting for transcript data from the Zoom page.'));
+      }, timeoutMs),
+    };
+    pendingTranscriptWaiters.push(waiter);
+  });
+}
+
+function handleTranscriptResponseMessage(event) {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== 'zoom-transcript-extension') return;
+  if (data.type === 'hook-debug') {
+    if (pendingTranscriptWaiters.length) {
+      log('Page hook observed network event', data.payload || {});
+    }
+    return;
+  }
+  if (data.type !== 'transcript-response') return;
+  const payload = data.payload;
+  if (!payload?.text || payload.text.length < 10) return;
+  if (pendingTranscriptWaiters.length) {
+    pendingTranscriptWaiters.shift().resolve(payload);
+    return;
+  }
+  transcriptResponseQueue.push(payload);
+  transcriptResponseQueue = transcriptResponseQueue.slice(-5);
 }
 
 function ensureLauncher() {
@@ -261,9 +249,7 @@ function applyDebugVisibility() {
 function setSaveAllRunning(isRunning) {
   const saveAll = document.getElementById('ztd-save-all');
   const stop = document.getElementById('ztd-stop-save-all');
-  const gen = document.getElementById('ztd-generate-kit-main');
   if (saveAll) saveAll.disabled = isRunning;
-  if (gen) gen.disabled = isRunning;
   if (stop) {
     stop.disabled = !isRunning;
     stop.classList.toggle('ztd-active', isRunning);
@@ -287,11 +273,10 @@ function updatePanelSummary() {
     totalAvailable: transcriptCountText(),
     currentPage: pagination.currentPage,
     totalPages: pagination.totalPages,
-    targetOs: currentSettings.targetOs,
     includeMeetingId: !!currentSettings.includeMeetingId,
-    downloadedEntriesTracked: downloadManifest.length,
+    savedEntriesTracked: downloadManifest.length,
     perItemDelayMs: SAVE_ALL_DELAY_MS,
-    note: 'Use a clean download folder. Save all available resets to page 1 before downloading and skips greyed-out rows with no transcript available.'
+    note: 'V2 plans filenames across all pages first, then captures transcript text and saves each file directly with its final name.'
   }, null, 2);
 }
 
@@ -305,18 +290,13 @@ function scheduleRescan() {
 }
 
 async function waitForRowsChange(previousSignature, timeoutMs = TRANSITION_TIMEOUT_MS) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    await sleep(300);
-    const rows = scanRows();
-    const sig = rowSignature(rows);
-    if (sig && sig !== previousSignature) {
-      await sleep(500);
-      const stableRows = scanRows();
-      return { ok: true, rows: stableRows, signature: rowSignature(stableRows) };
-    }
-  }
-  return { ok: false };
+  return await waitForPageRowsChange({
+    previousSignature,
+    timeoutMs,
+    sleep,
+    scanRows,
+    rowSignature,
+  });
 }
 
 function ensurePatternHelpModal() {
@@ -340,11 +320,37 @@ function ensurePatternHelpModal() {
             <tr><td>{meetingId}</td><td>Zoom meeting ID</td><td>12345678901</td></tr>
           </tbody>
         </table>
-        <pre id="ztd-pattern-help-output"></pre>
+        <div id="ztd-pattern-help-output"></div>
       </div>
     `;
     document.body.appendChild(modal);
     modal.querySelector('#ztd-pattern-help-close').addEventListener('click', () => { modal.hidden = true; });
+    modal.addEventListener('click', event => { if (event.target === modal) modal.hidden = true; });
+  }
+  return modal;
+}
+
+function ensureAboutModal() {
+  let modal = document.getElementById(ABOUT_MODAL_ID);
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = ABOUT_MODAL_ID;
+    modal.hidden = true;
+    modal.innerHTML = `
+      <div id="ztd-about-card">
+        <div class="ztd-help-actions">
+          <strong>About</strong>
+          <button type="button" class="ztd-secondary" id="ztd-about-close">Close</button>
+        </div>
+        <div class="ztd-about-body">
+          <p>Created by Blake Stover</p>
+          <p><a href="mailto:bstover@gmail.com">bstover@gmail.com</a></p>
+          <p><a href="https://github.com/outsidethebounds/Zoom_Transcript_Downloader" target="_blank" rel="noopener noreferrer">GitHub Repository</a></p>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.querySelector('#ztd-about-close').addEventListener('click', () => { modal.hidden = true; });
     modal.addEventListener('click', event => { if (event.target === modal) modal.hidden = true; });
   }
   return modal;
@@ -366,17 +372,16 @@ function ensureSettingsModal() {
           <input type="text" id="ztd-settings-pattern" />
         </label>
         <div><strong>Example output:</strong> <span id="ztd-pattern-example"></span></div>
-        <label>Target OS
-          <select id="ztd-settings-os">
-            <option value="macos">macOS</option>
-            <option value="windows">Windows</option>
-          </select>
+        <label>Save folder inside Downloads
+          <input type="text" id="ztd-settings-subfolder" placeholder="Optional, for example Work/Zoom" />
         </label>
+        <div class="ztd-settings-note">Files can be routed into a subfolder under the browser Downloads folder. Arbitrary absolute folder selection is not supported by this download API.</div>
+        <div><strong>Files will save to:</strong> <span id="ztd-settings-folder-example"></span></div>
         <label><input type="checkbox" id="ztd-settings-include-meeting-id" /> Include meeting ID in every filename</label>
         <div class="ztd-settings-actions">
           <button type="button" id="ztd-settings-save">Save settings</button>
         </div>
-        <pre id="ztd-settings-output"></pre>
+        <div id="ztd-settings-save-status" class="ztd-settings-note" hidden></div>
       </div>
     `;
     document.body.appendChild(modal);
@@ -384,31 +389,34 @@ function ensureSettingsModal() {
     modal.addEventListener('click', event => { if (event.target === modal) modal.hidden = true; });
     modal.querySelector('#ztd-pattern-help').addEventListener('click', () => {
       const help = ensurePatternHelpModal();
-      const pattern = modal.querySelector('#ztd-settings-pattern').value || '{date} - {time} - {title}';
-      help.querySelector('#ztd-pattern-help-output').textContent = JSON.stringify({
-        pattern,
-        example: buildTargetBase(sampleMeta(), { filenamePattern: pattern, includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked }) + '.txt',
-        examples: ['{date} - {time} - {title}', '{date} - {title}', '{date} - {time} - {title} - {meetingId}']
-      }, null, 2);
+      const pattern = currentPattern(modal);
+      const example = `${buildTargetBase(sampleMeta(), { filenamePattern: pattern, includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked })}.txt`;
+      help.querySelector('#ztd-pattern-help-output').innerHTML = `
+        <p><strong>Current pattern:</strong> <code>${escapeHtml(pattern)}</code></p>
+        <p><strong>Example:</strong> <code>${escapeHtml(example)}</code></p>
+        <p><strong>Try these:</strong></p>
+        <ul>
+          <li><code>{date} - {time} - {title}</code></li>
+          <li><code>{date} - {title}</code></li>
+          <li><code>{date} - {time} - {title} - {meetingId}</code></li>
+        </ul>
+      `;
       help.hidden = false;
     });
-    modal.querySelector('#ztd-settings-pattern').addEventListener('input', () => {
-      const pattern = modal.querySelector('#ztd-settings-pattern').value || '{date} - {time} - {title}';
-      modal.querySelector('#ztd-pattern-example').textContent = buildTargetBase(sampleMeta(), { filenamePattern: pattern, includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked }) + '.txt';
-    });
-    modal.querySelector('#ztd-settings-include-meeting-id').addEventListener('change', () => {
-      const pattern = modal.querySelector('#ztd-settings-pattern').value || '{date} - {time} - {title}';
-      modal.querySelector('#ztd-pattern-example').textContent = buildTargetBase(sampleMeta(), { filenamePattern: pattern, includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked }) + '.txt';
-    });
+    modal.querySelector('#ztd-settings-pattern').addEventListener('input', () => renderSettingsPreview(modal));
+    modal.querySelector('#ztd-settings-subfolder').addEventListener('input', () => renderSettingsPreview(modal));
+    modal.querySelector('#ztd-settings-include-meeting-id').addEventListener('change', () => renderSettingsPreview(modal));
     modal.querySelector('#ztd-settings-save').addEventListener('click', async () => {
       const settings = {
-        filenamePattern: modal.querySelector('#ztd-settings-pattern').value,
-        targetOs: modal.querySelector('#ztd-settings-os').value,
+        filenamePattern: currentPattern(modal),
+        downloadSubfolder: currentDownloadSubfolder(modal),
         includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked,
       };
       await setSettings(settings);
       currentSettings = { ...(currentSettings || {}), ...settings };
-      modal.querySelector('#ztd-settings-output').textContent = JSON.stringify({ ok: true, settings }, null, 2);
+      const status = modal.querySelector('#ztd-settings-save-status');
+      status.hidden = false;
+      status.textContent = `Saved. Files will use this name pattern and save to Downloads/${buildDownloadFolderPath(settings.downloadSubfolder)}.`;
       updatePanelSummary();
       log('Settings updated', settings);
     });
@@ -420,165 +428,158 @@ async function populateSettingsModal() {
   const modal = ensureSettingsModal();
   const settings = await getSettings();
   modal.querySelector('#ztd-settings-pattern').value = settings.filenamePattern || '';
-  modal.querySelector('#ztd-settings-os').value = settings.targetOs || 'macos';
+  modal.querySelector('#ztd-settings-subfolder').value = settings.downloadSubfolder || '';
   modal.querySelector('#ztd-settings-include-meeting-id').checked = !!settings.includeMeetingId;
-  modal.querySelector('#ztd-pattern-example').textContent = buildTargetBase(sampleMeta(), settings) + '.txt';
-  modal.querySelector('#ztd-settings-output').textContent = JSON.stringify(settings, null, 2);
+  renderSettingsPreview(modal);
+  modal.querySelector('#ztd-settings-save-status').hidden = true;
+  modal.querySelector('#ztd-settings-save-status').textContent = '';
   return modal;
 }
 
-async function triggerZoomDownload(item, settings) {
-  const marker = await getLatestDownloadId();
-  log('Waiting for observed browser download', { afterId: marker?.maxId || 0, title: item.meta.title });
-  item.button.click();
-  const observed = await waitForObservedDownload({ afterId: marker?.maxId || 0, timeoutMs: 20000 });
-  const normalized = normalizeMeta(item.meta);
-  const entry = {
+function buildPlannedEntry(item, settings, page) {
+  return {
     runId: currentRunId,
     title: item.meta.title,
     meetingId: item.meta.meetingId,
     dateText: item.meta.dateText,
-    page: getPaginationState().currentPage,
+    page,
     rowKey: item.key,
-    sourceFilename: observed?.download?.basename || null,
-    sourcePath: observed?.download?.filename || null,
-    observedDownloadId: observed?.download?.id || null,
     targetBase: buildTargetBase(item.meta, settings),
-    ...normalized,
+    ...normalizeMeta(item.meta),
   };
+}
+
+function rowsMatchPlan(currentRows, plannedEntries) {
+  if (currentRows.length !== plannedEntries.length) return false;
+  return currentRows.every((row, index) => {
+    const planned = plannedEntries[index];
+    return !!planned
+      && row.key === planned.rowKey
+      && row.meta?.meetingId === planned.meetingId
+      && row.meta?.dateText === planned.dateText
+      && row.meta?.title === planned.title;
+  });
+}
+
+async function collectDownloadPlan(settings) {
+  const plannedEntries = [];
+  const visitedSignatures = new Set();
+  let pagesVisited = 0;
+  let skippedUnavailable = 0;
+  let pageNumber = 1;
+
+  while (true) {
+    if (saveAllController.stopRequested) {
+      return { ok: false, stopped: true, error: 'Stopped during planning.' };
+    }
+    const allRowsNow = scanRows();
+    const rowsNow = allRowsNow.filter(r => r.hasDownload);
+    const unavailableNow = Math.max(0, allRowsNow.length - rowsNow.length);
+    const signature = rowSignature(allRowsNow);
+    const pagination = getPaginationState();
+
+    if (!allRowsNow.length) {
+      return { ok: false, error: 'No transcript rows were found while planning the download pass.', page: pageNumber };
+    }
+    if (visitedSignatures.has(signature)) {
+      return { ok: false, error: 'Detected duplicate page signature while planning downloads. Aborting to avoid looping.', pagesVisited, skippedUnavailable };
+    }
+
+    visitedSignatures.add(signature);
+    pagesVisited += 1;
+    skippedUnavailable += unavailableNow;
+    rowsNow.forEach(row => plannedEntries.push(buildPlannedEntry(row, settings, pageNumber)));
+
+    log('Planned page', {
+      page: pageNumber,
+      totalPages: pagination.totalPages,
+      downloadableRows: rowsNow.length,
+      unavailableRows: unavailableNow,
+      plannedEntries: plannedEntries.length,
+    });
+
+    const moved = await gotoNextPage();
+    if (!moved.ok) break;
+    await sleep(800);
+    pageNumber += 1;
+  }
+
+  return {
+    ok: true,
+    entries: applyCollisionSafeFilenames(plannedEntries, settings),
+    pagesVisited,
+    skippedUnavailable,
+  };
+}
+
+async function saveTranscriptRow(item, plannedEntry) {
+  clearTranscriptResponseQueue();
+  log('About to click transcript row', {
+    title: item.meta.title,
+    meetingId: item.meta.meetingId,
+    page: plannedEntry.page,
+    targetFilename: plannedEntry.targetFilename,
+  });
+  item.button.scrollIntoView({ block: 'center', inline: 'nearest' });
+  item.button.click();
+  log('Clicked transcript row', { title: item.meta.title, targetFilename: plannedEntry.targetFilename });
+  log('Waiting for transcript response', { title: item.meta.title, targetFilename: plannedEntry.targetFilename });
+  const response = await waitForTranscriptResponse(20000);
+  log('Transcript response received', {
+    title: item.meta.title,
+    targetFilename: plannedEntry.targetFilename,
+    responseUrl: response?.url || null,
+    contentType: response?.contentType || '',
+    textLength: response?.text?.length || 0,
+  });
+  const saved = await saveTranscript({
+    filename: plannedEntry.targetFilename,
+    content: response.text,
+    mimeType: 'text/plain;charset=utf-8',
+  });
+
+  const entry = {
+    ...plannedEntry,
+    sourceUrl: response.url || null,
+    sourceContentType: response.contentType || '',
+    savedFilename: saved?.filename || plannedEntry.targetFilename,
+    savedDownloadId: saved?.downloadId || null,
+  };
+
   downloadManifest.push(entry);
   updatePanelSummary();
-  log('Triggered Zoom browser download', entry);
-  if (!entry.sourceFilename) {
-    log('Failed to observe browser download for transcript', { title: entry.title, meetingId: entry.meetingId, page: entry.page });
-    return { ok: false, error: 'Could not observe the downloaded file in the browser. Rename kit would be unreliable.', entry };
+  log('Saved transcript with final filename', entry);
+
+  if (!saved?.ok) {
+    return { ok: false, error: saved?.error || 'Failed to save transcript file.', entry };
   }
-  return { ok: true, browserDownloadTriggered: true, sourceFilename: entry.sourceFilename, targetBase: entry.targetBase };
+  return { ok: true, savedFilename: entry.savedFilename, targetFilename: plannedEntry.targetFilename };
 }
 
 async function gotoFirstPage() {
-  const seen = new Set();
-  for (let steps = 0; steps < 25; steps++) {
-    const state = getPaginationState();
-    const signature = rowSignature();
-    const key = `${state.currentPage || 'unknown'}::${signature}`;
-    if (seen.has(key)) {
-      return { ok: false, error: 'Detected a loop while trying to return to page 1.' };
-    }
-    seen.add(key);
-    if (state.currentPage === 1) return { ok: true, page: 1 };
-    if (!state.canGoPrev) {
-      const rowsNow = scanRows();
-      if (rowsNow.length) {
-        log('Assuming page 1 because previous-page control is disabled', { currentPage: state.currentPage, rows: rowsNow.length });
-        return { ok: true, page: state.currentPage || 1 };
-      }
-      return { ok: false, error: 'Could not continue navigating back to page 1.' };
-    }
-    log('Resetting to page 1', { currentPage: state.currentPage, totalPages: state.totalPages });
-    state.prevButton.click();
-    const moved = await waitForRowsChange(signature);
-    if (!moved.ok) {
-      return { ok: false, error: 'Timed out while trying to return to page 1.' };
-    }
-  }
-  return { ok: false, error: 'Too many attempts while resetting to page 1.' };
+  return await navigateToFirstPage({
+    getPaginationState,
+    rowSignature,
+    scanRows,
+    waitForRowsChange,
+    log,
+  });
 }
 
 async function gotoNextPage() {
-  const state = getPaginationState();
-  const previousSignature = rowSignature();
-  if (!state.canGoNext || !state.nextButton) {
-    log('No usable next-page button found', { currentPage: state.currentPage, totalPages: state.totalPages });
-    return { ok: false, reason: 'no-next-page' };
-  }
-
-  log('Attempting next-page navigation', {
-    currentPage: state.currentPage,
-    totalPages: state.totalPages,
-    aria: state.nextButton.getAttribute('aria-label') || '',
+  return await navigateToNextPage({
+    getPaginationState,
+    rowSignature,
+    waitForRowsChange,
+    log,
   });
-  state.nextButton.click();
-  const moved = await waitForRowsChange(previousSignature);
-  if (!moved.ok) {
-    log('Next-page navigation timed out', { currentPage: state.currentPage });
-    return { ok: false, reason: 'timeout' };
-  }
-  const afterState = getPaginationState();
-  log('Next-page navigation succeeded', { from: state.currentPage, to: afterState.currentPage, rows: moved.rows.length });
-  return { ok: true, state: afterState };
-}
-
-function generateMacScript(entries) {
-  const lines = ['#!/bin/bash', 'set -euo pipefail', '', 'echo "Renaming Zoom transcript files in $(pwd)"', ''];
-  entries.forEach(entry => {
-    lines.push(`if [ ! -f ${JSON.stringify(entry.sourceFilename)} ]; then echo "Missing expected source file: ${entry.sourceFilename}"; exit 1; fi`);
-    lines.push(`mv -n ${JSON.stringify(entry.sourceFilename)} ${JSON.stringify(entry.targetFilename)}`);
-    lines.push(`echo "Renamed ${entry.sourceFilename} -> ${entry.targetFilename}"`);
-    lines.push('');
-  });
-  return lines.join('\n') + '\n';
-}
-
-function generatePowerShellScript(entries) {
-  const lines = [];
-  entries.forEach(entry => {
-    lines.push(`if (!(Test-Path -LiteralPath ${JSON.stringify(entry.sourceFilename)})) { throw "Missing expected source file: ${entry.sourceFilename}" }`);
-    lines.push(`Rename-Item -LiteralPath ${JSON.stringify(entry.sourceFilename)} -NewName ${JSON.stringify(entry.targetFilename)}`);
-    lines.push('');
-  });
-  return lines.join('\r\n') + '\r\n';
-}
-
-async function generateRenameKit() {
-  const settings = await getSettings();
-  log('Generate rename kit clicked', { tracked: downloadManifest.length, runId: currentRunId });
-  if (!downloadManifest.length) {
-    return { ok: false, error: 'No downloaded transcript entries have been tracked yet. Use Save all available first.' };
-  }
-  if (downloadManifest.some(entry => !entry.sourceFilename)) {
-    return {
-      ok: false,
-      error: 'At least one downloaded file could not be matched to an observed browser download. Refusing to generate an unreliable rename kit.',
-      unmatched: downloadManifest.filter(entry => !entry.sourceFilename).map(entry => ({ title: entry.title, meetingId: entry.meetingId, page: entry.page }))
-    };
-  }
-
-  const finalizedEntries = applyCollisionSafeFilenames(downloadManifest, settings);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const manifestName = `zoom-transcript-manifest-${timestamp}.json`;
-  const scriptName = settings.targetOs === 'windows' ? 'rename_zoom_transcripts.ps1' : 'rename_zoom_transcripts.sh';
-  const scriptMime = settings.targetOs === 'windows' ? 'text/plain;charset=utf-8' : 'application/x-sh;charset=utf-8';
-  const scriptContent = settings.targetOs === 'windows' ? generatePowerShellScript(finalizedEntries) : generateMacScript(finalizedEntries);
-  const instructions = settings.targetOs === 'windows'
-    ? ['Use a clean download folder.', 'Open PowerShell in that folder.', 'Run: powershell -ExecutionPolicy Bypass -File .\\rename_zoom_transcripts.ps1']
-    : ['Use a clean download folder.', 'Open Terminal in that folder.', 'Run: chmod +x rename_zoom_transcripts.sh', 'Then: ./rename_zoom_transcripts.sh'];
-
-  const manifestPayload = {
-    generatedAt: new Date().toISOString(),
-    runId: currentRunId,
-    targetOs: settings.targetOs,
-    includeMeetingId: !!settings.includeMeetingId,
-    instructions,
-    requiresCleanFolder: true,
-    entries: finalizedEntries,
-  };
-
-  const manifestResult = await chrome.runtime.sendMessage({
-    type: `${EXTENSION_NS}:downloadArtifact`,
-    payload: { filename: manifestName, content: JSON.stringify(manifestPayload, null, 2), mimeType: 'application/json;charset=utf-8' }
-  });
-  const scriptResult = await chrome.runtime.sendMessage({
-    type: `${EXTENSION_NS}:downloadArtifact`,
-    payload: { filename: scriptName, content: scriptContent, mimeType: scriptMime }
-  });
-  return { ok: !!(manifestResult?.ok && scriptResult?.ok), manifestResult, scriptResult, instructions, entries: finalizedEntries.length };
 }
 
 function renderPanel(rows, settings) {
   let panel = document.getElementById(PANEL_ID);
   ensureSettingsModal();
   ensurePatternHelpModal();
+  ensureAboutModal();
   if (!panel) {
     panel = document.createElement('section');
     panel.id = PANEL_ID;
@@ -591,14 +592,13 @@ function renderPanel(rows, settings) {
         </div>
         <div class="ztd-header-right">
           <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-settings" title="Settings">⚙</button>
-          <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-readme-help" title="Open README help">?</button>
+          <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-readme-help" title="About">?</button>
           <button type="button" class="ztd-secondary" id="ztd-collapse">Expand</button>
           <button type="button" class="ztd-secondary" id="ztd-close">Close</button>
         </div>
       </div>
       <div class="ztd-controls">
         <button type="button" id="ztd-save-all">Save all available</button>
-        <button type="button" id="ztd-generate-kit-main">Generate rename kit</button>
         <button type="button" class="ztd-secondary" id="ztd-stop-save-all">Stop</button>
       </div>
       <pre id="ztd-output"></pre>
@@ -615,7 +615,7 @@ function renderPanel(rows, settings) {
     panel.querySelector('#ztd-close').addEventListener('click', () => { panel.remove(); ensureLauncher(); });
     panel.querySelector('#ztd-settings').addEventListener('click', async () => { const settingsModal = await populateSettingsModal(); settingsModal.hidden = false; });
     panel.querySelector('#ztd-readme-help').addEventListener('click', () => {
-      window.open('https://github.com/outsidethebounds/Zoom_Transcript_Downloader/blob/main/README.md', '_blank', 'noopener,noreferrer');
+      ensureAboutModal().hidden = false;
     });
     panel.querySelector('#ztd-collapse').addEventListener('click', event => {
       panel.classList.toggle('ztd-collapsed');
@@ -623,102 +623,163 @@ function renderPanel(rows, settings) {
     });
     panel.querySelector('#ztd-debug-toggle').addEventListener('change', applyDebugVisibility);
 
-    panel.querySelector('#ztd-generate-kit-main').addEventListener('click', async () => {
-      stickyPanelMessage = 'Generating rename kit...';
-      panel.querySelector('#ztd-output').textContent = stickyPanelMessage;
-      try {
-        const result = await generateRenameKit();
-        stickyPanelMessage = result.ok ? {
-          message: 'Rename kit generated.',
-          instructions: result.instructions,
-          entries: result.entries,
-          manifestDownload: result.manifestResult,
-          scriptDownload: result.scriptResult
-        } : result;
-        panel.querySelector('#ztd-output').textContent = JSON.stringify(stickyPanelMessage, null, 2);
-      } catch (error) {
-        stickyPanelMessage = { ok: false, error: String(error?.message || error) };
-        panel.querySelector('#ztd-output').textContent = JSON.stringify(stickyPanelMessage, null, 2);
-      }
-    });
-
     panel.querySelector('#ztd-save-all').addEventListener('click', async () => {
-      currentDownloadFolderName = getDownloadFolderName();
+      const settingsNow = await getSettings();
+      currentDownloadFolderName = buildDownloadFolderPath(settingsNow.downloadSubfolder);
       stickyPanelMessage = {
         ok: true,
         message: 'Download job is running.',
-        detail: 'Keep this tab open while transcripts download. You can use Stop to halt after the current item.',
+        detail: 'Keep this tab open while transcripts are captured and saved with final names. You can use Stop to halt after the current item.',
         folderName: currentDownloadFolderName
       };
-      const settingsNow = await getSettings();
       currentRunId = `run-${Date.now()}`;
-      await startDownloadBatch({ runId: currentRunId, folderName: currentDownloadFolderName });
+      await startDownloadBatch({ runId: currentRunId, folderName: currentDownloadFolderName, mode: 'direct-save' });
       downloadManifest = [];
       updatePanelSummary();
       saveAllController = { running: true, stopRequested: false };
       setSaveAllRunning(true);
       showToast(`Download job started. Files will be saved in Downloads/${currentDownloadFolderName}.`, 'info', 5000);
+
       const results = [];
+      let plannedEntries = [];
       let pagesVisited = 0;
       let skippedUnavailable = 0;
+      let savePageNumber = 1;
+
       try {
-        panel.querySelector('#ztd-output').textContent = 'Resetting to page 1 before download...';
+        debugCheckpoint('Resetting to page 1 before planning download', {
+          runId: currentRunId,
+          folderName: currentDownloadFolderName,
+        });
         const reset = await gotoFirstPage();
         if (!reset.ok) {
-          panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: reset.error, action: 'Aborted before download because page-1 reset failed.' }, null, 2);
+          debugCheckpoint('Reset to page 1 before planning failed', { error: reset.error });
           return;
         }
 
         await sleep(800);
         scheduleRescan();
-        const visitedSignatures = new Set();
+
+        debugCheckpoint('Planning final filenames across all pages');
+        const plan = await collectDownloadPlan(settingsNow);
+        if (!plan.ok) {
+          debugCheckpoint('Planning failed', plan);
+          return;
+        }
+
+        plannedEntries = plan.entries;
+        pagesVisited = plan.pagesVisited;
+        skippedUnavailable = plan.skippedUnavailable;
+        debugCheckpoint('Planning complete', {
+          plannedEntries: plannedEntries.length,
+          pagesVisited,
+          skippedUnavailable,
+        });
+
+        debugCheckpoint('Resetting to page 1 before save pass');
+        const resetForSave = await gotoFirstPage();
+        if (!resetForSave.ok) {
+          debugCheckpoint('Reset to page 1 before save pass failed', { error: resetForSave.error });
+          return;
+        }
+
+        await sleep(800);
+        debugCheckpoint('Save pass starting', {
+          plannedEntries: plannedEntries.length,
+          pagesVisited,
+        });
+
         while (true) {
           const allRowsNow = scanRows();
           const rowsNow = allRowsNow.filter(r => r.hasDownload);
-          const unavailableNow = Math.max(0, allRowsNow.length - rowsNow.length);
-          const signature = rowSignature(allRowsNow);
-          if (!allRowsNow.length) {
-            panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: 'No transcript rows were found after page reset/navigation.', page: getPaginationState().currentPage }, null, 2);
-            return;
-          }
-          if (visitedSignatures.has(signature)) {
-            panel.querySelector('#ztd-output').textContent = JSON.stringify({ ok: false, error: 'Detected duplicate page signature during pagination. Aborting to avoid looping.', pagesVisited, downloaded: downloadManifest.length, skippedUnavailable }, null, 2);
-            return;
-          }
-          visitedSignatures.add(signature);
-          pagesVisited += 1;
-          skippedUnavailable += unavailableNow;
           const pagination = getPaginationState();
-          log('Processing page', { page: pagination.currentPage, totalPages: pagination.totalPages, downloadableRows: rowsNow.length, unavailableRows: unavailableNow, pagesVisited });
-          if (!rowsNow.length) {
-            results.push({ ok: true, page: pagination.currentPage, skippedUnavailable: unavailableNow, message: unavailableNow ? 'No downloadable transcripts on this page; skipped greyed-out rows.' : 'No downloadable transcripts on this page.' });
+
+          if (!allRowsNow.length) {
+            debugCheckpoint('Save pass found no transcript rows', {
+              page: savePageNumber,
+              error: 'No transcript rows were found after page reset/navigation.',
+            });
+            return;
           }
+
+          const pageEntries = plannedEntries.filter(entry => entry.page === savePageNumber);
+          debugCheckpoint('Checking live page against plan', {
+            page: savePageNumber,
+            totalPages: pagination.totalPages,
+            expectedRows: pageEntries.length,
+            actualRows: rowsNow.length,
+          });
+          if (!rowsMatchPlan(rowsNow, pageEntries)) {
+            debugCheckpoint('Live page does not match planned rows', {
+              error: 'The live Zoom page no longer matches the planned transcript list. Refresh and try again.',
+              page: savePageNumber,
+              expectedRows: pageEntries.length,
+              actualRows: rowsNow.length,
+              plannedRowKeys: pageEntries.map(entry => entry.rowKey),
+              actualRowKeys: rowsNow.map(row => row.key),
+            });
+            return;
+          }
+
+          debugCheckpoint('Live page matched plan', {
+            page: savePageNumber,
+            rows: rowsNow.length,
+            savedSoFar: downloadManifest.length,
+          });
+          log('Saving page', {
+            page: savePageNumber,
+            totalPages: pagination.totalPages,
+            downloadableRows: rowsNow.length,
+            savedSoFar: downloadManifest.length,
+          });
+
           for (let i = 0; i < rowsNow.length; i++) {
             if (saveAllController.stopRequested) {
-              results.push({ stopped: true, page: pagination.currentPage, processed: downloadManifest.length, skippedUnavailable });
-              panel.querySelector('#ztd-output').textContent = JSON.stringify(results, null, 2);
+              results.push({ stopped: true, page: savePageNumber, processed: downloadManifest.length, skippedUnavailable });
+              setOutput(results);
               return;
             }
-            results.push(await triggerZoomDownload(rowsNow[i], settingsNow));
+            debugCheckpoint('Saving transcript row', {
+              page: savePageNumber,
+              rowIndex: i,
+              rowKey: rowsNow[i].key,
+              title: rowsNow[i].meta?.title || '',
+              targetFilename: pageEntries[i]?.targetFilename || null,
+            });
+            results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i]));
             await sleep(SAVE_ALL_DELAY_MS);
           }
+
           const moved = await gotoNextPage();
           if (!moved.ok) break;
+          savePageNumber += 1;
+          debugCheckpoint('Moved to next page for save pass', {
+            nextPage: savePageNumber,
+          });
           await sleep(800);
         }
       } finally {
+        flushPendingTranscriptWaiters(new Error('Download batch finished before transcript capture completed.'));
+        await finishDownloadBatch({ runId: currentRunId }).catch(() => {});
         saveAllController.running = false;
         setSaveAllRunning(false);
       }
+
       stickyPanelMessage = null;
-      panel.querySelector('#ztd-output').textContent = JSON.stringify({ pagesVisited, downloaded: downloadManifest.length, skippedUnavailable, results }, null, 2);
-      showToast(`Download job finished. Downloaded ${downloadManifest.length} transcript${downloadManifest.length === 1 ? '' : 's'}.`, 'success', 5000);
+      panel.querySelector('#ztd-output').textContent = JSON.stringify({
+        pagesVisited,
+        planned: plannedEntries.length,
+        downloaded: downloadManifest.length,
+        skippedUnavailable,
+        results,
+      }, null, 2);
+      showToast(`Download job finished. Saved ${downloadManifest.length} transcript${downloadManifest.length === 1 ? '' : 's'} with final filenames.`, 'success', 5000);
     });
 
     panel.querySelector('#ztd-stop-save-all').addEventListener('click', () => {
       if (saveAllController.running) {
         saveAllController.stopRequested = true;
-        stickyPanelMessage = 'Stop requested. Will halt after the current download trigger.';
+        stickyPanelMessage = 'Stop requested. Will halt after the current transcript finishes saving.';
         panel.querySelector('#ztd-output').textContent = stickyPanelMessage;
         showToast('Stop requested. The job will halt after the current item.', 'warn', 4000);
       }
@@ -742,7 +803,15 @@ async function boot(verbose = false) {
   const rows = collectRows();
   renderPanel(rows, settings);
   scheduleRescan();
-  if (verbose) log('Panel ready', { rows: rows.length, total: transcriptCountText(), pagination: getPaginationState(), tracked: downloadManifest.length, delayMs: SAVE_ALL_DELAY_MS });
+  if (verbose) {
+    log('Panel ready', {
+      rows: rows.length,
+      total: transcriptCountText(),
+      pagination: getPaginationState(),
+      tracked: downloadManifest.length,
+      delayMs: SAVE_ALL_DELAY_MS,
+    });
+  }
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -752,9 +821,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
+window.addEventListener('message', handleTranscriptResponseMessage);
+
 const observer = new MutationObserver(() => {
   scheduleRescan();
   if (!document.getElementById(PANEL_ID)) ensureLauncher();
 });
 observer.observe(document.documentElement, { childList: true, subtree: true });
+
 boot().catch(error => log('Initial boot failed', String(error)));

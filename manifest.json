@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Zoom Transcript Downloader",
-  "version": "1.5.4",
-  "description": "Downloads Zoom transcripts and generates rename scripts for macOS or Windows.",
+  "version": "2026.8",
+  "version_name": "2026.08",
+  "description": "Downloads Zoom transcripts and saves them directly with final filenames.",
   "permissions": [
     "downloads",
     "storage",
@@ -36,6 +37,9 @@
         "https://*.zoom.us/recording/meeting/transcript*"
       ],
       "js": [
+        "lib/core.js",
+        "lib/page.js",
+        "lib/runtime.js",
         "content.js"
       ],
       "css": [

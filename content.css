@@ -29,7 +29,8 @@
   font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 #ztd-settings-modal,
-#ztd-pattern-help-modal {
+#ztd-pattern-help-modal,
+#ztd-about-modal {
   position: fixed;
   inset: 0;
   z-index: 2147483648;
@@ -39,7 +40,8 @@
   justify-content: center;
 }
 #ztd-settings-card,
-#ztd-pattern-help-card {
+#ztd-pattern-help-card,
+#ztd-about-card {
   width: min(560px, 92vw);
   max-height: 80vh;
   overflow: auto;
@@ -54,7 +56,8 @@
 #ztd-panel .ztd-controls,
 #ztd-panel .ztd-debug-row,
 #ztd-settings-card .ztd-settings-actions,
-#ztd-pattern-help-card .ztd-help-actions {
+#ztd-pattern-help-card .ztd-help-actions,
+#ztd-about-card .ztd-help-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -71,7 +74,8 @@
 }
 #ztd-panel button,
 #ztd-settings-card button,
-#ztd-pattern-help-card button {
+#ztd-pattern-help-card button,
+#ztd-about-card button {
   background: #2563eb;
   color: white;
   border: 0;
@@ -81,7 +85,8 @@
 }
 #ztd-panel button.ztd-secondary,
 #ztd-settings-card button.ztd-secondary,
-#ztd-pattern-help-card button.ztd-secondary {
+#ztd-pattern-help-card button.ztd-secondary,
+#ztd-about-card button.ztd-secondary {
   background: #374151;
 }
 #ztd-stop-save-all {
@@ -110,11 +115,14 @@
 }
 #ztd-output,
 #ztd-log,
-#ztd-settings-output,
 #ztd-pattern-help-output {
   background: #e5e7eb;
   color: #111827;
   border: 1px solid #9ca3af;
+}
+#ztd-pattern-help-output {
+  border-radius: 8px;
+  padding: 10px;
 }
 #ztd-log {
   max-height: 260px;
@@ -122,7 +130,8 @@
 }
 #ztd-debug-wrap[hidden],
 #ztd-settings-modal[hidden],
-#ztd-pattern-help-modal[hidden] {
+#ztd-pattern-help-modal[hidden],
+#ztd-about-modal[hidden] {
   display: none !important;
 }
 #ztd-panel.ztd-collapsed #ztd-output,
@@ -140,6 +149,19 @@
   padding: 6px 8px;
   color: #111827;
   background: #f9fafb;
+}
+#ztd-settings-card .ztd-settings-note {
+  color: #d1d5db;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 6px;
+}
+#ztd-settings-save-status {
+  background: #065f46;
+  border: 1px solid #10b981;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 10px;
 }
 #ztd-panel .ztd-gear-icon {
   width: 26px;
@@ -184,4 +206,14 @@
   border: 1px solid #4b5563;
   padding: 6px 8px;
   text-align: left;
+}
+#ztd-pattern-help-card ul {
+  margin: 8px 0 0 18px;
+  padding: 0;
+}
+#ztd-about-card a {
+  color: #93c5fd;
+}
+#ztd-about-card .ztd-about-body p {
+  margin: 0 0 10px;
 }

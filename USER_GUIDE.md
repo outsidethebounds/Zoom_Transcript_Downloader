@@ -1,23 +1,21 @@
 # Zoom Transcript Downloader — User Guide
 
-Version: 1.5.4
+Version: 2026.08
 
 ## What this extension does
 
 This extension helps you:
 - download all Zoom transcript files across all available transcript pages
-- skip entries where Zoom shows a disabled/greyed-out download button
-- generate a rename kit that renames those files into clean filenames
+- skip entries where Zoom shows a disabled or greyed-out download button
+- save the files directly with clean final filenames
 
-The rename kit contains:
-- a manifest JSON file
-- a script for macOS or Windows
+There is no separate rename step in v2.
 
 ## Important rule before you start
 
 Use a **clean folder** for transcript downloads.
 
-That means the folder where Zoom is downloading these transcript `.txt` files should not also contain unrelated `.txt` files.
+That means the folder where the extension is saving these transcript `.txt` files should not also contain unrelated `.txt` files.
 
 ## Install the extension
 
@@ -39,31 +37,24 @@ If you update the extension later:
 
 ## Main workflow
 
-### 1. Download all transcripts
+### Download all transcripts
 Click **Save all available**.
 
 The extension should:
 - reset to page 1 first
+- plan filenames across all pages
 - show a visible in-page notification that the download job is running
-- download transcript files from all available pages
+- save transcript files from all available pages
 - skip greyed-out transcript rows that are unavailable
 - stop with a clear error if page-1 reset fails
 
-### 2. Generate the rename kit
-After downloads finish, click **Generate rename kit**.
-
-This downloads:
-- a manifest JSON file
-- a rename script
-
-### 3. Run the script in the download folder
-Run the script in the same folder where the transcript `.txt` files were downloaded.
+When the run finishes, the files should already have their final names.
 
 ## Settings
 
 Open the gear icon to set:
 - **Filename pattern**
-- **Target OS**
+- **Save folder inside Downloads**
 - whether to include **meeting ID** in every filename
 
 Use the **`?`** button next to the gear to open the GitHub README in a new browser window.
@@ -77,34 +68,19 @@ Example:
 
 `2026-04-04 - 0930 - Weekly Sync.txt`
 
+### Save folder
+The extension can save into a subfolder under your browser's normal `Downloads` folder.
+
+Example:
+
+`Downloads/Work/Zoom/ZoomTranscripts-08182026`
+
+The browser download API used here does not allow the extension to pick an arbitrary absolute folder on disk.
+
 ### Optional meeting ID
 Meeting ID is **not** included by default.
 
 It can still be used automatically when two files would otherwise collide.
-
-## Running the rename script
-
-### macOS
-```bash
-cd /path/to/download/folder
-chmod +x rename_zoom_transcripts.sh
-./rename_zoom_transcripts.sh
-```
-
-### Windows / Edge / Chrome
-```powershell
-cd C:\path\to\download\folder
-powershell -ExecutionPolicy Bypass -File .\rename_zoom_transcripts.ps1
-```
-
-## What the JSON file is for
-
-The JSON manifest is not something you run.
-
-It is a record of:
-- what transcripts were tracked
-- what filenames were expected
-- what script instructions were generated
 
 ## Troubleshooting
 
@@ -115,27 +91,12 @@ Turn on **Show debug** and try again.
 The extension is designed to abort rather than risk a partial run.
 Refresh the page and try again.
 
-### The script will not run on Windows
-Use:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\rename_zoom_transcripts.ps1
-```
-
-### The script is not a `.sh` file on macOS
-Rename it to:
-
-`rename_zoom_transcripts.sh`
-
-Then run:
-
-```bash
-chmod +x rename_zoom_transcripts.sh
-./rename_zoom_transcripts.sh
-```
+### It says the page no longer matches the plan
+Zoom likely changed the visible list while the run was happening.
+Refresh the page and try again.
 
 ## Current version
 
 This guide was written for:
 
-**Zoom Transcript Downloader v1.5.4**
+**Zoom Transcript Downloader v2026.08**
