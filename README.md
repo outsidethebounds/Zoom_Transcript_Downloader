@@ -1,5 +1,12 @@
 # Zoom Transcript Downloader
 
+## License
+
+Copyright (c) 2026 Blake Stover. All rights reserved.
+
+This repository is proprietary. No permission is granted to use, copy, modify, or redistribute
+this code without prior written permission.
+
 ## What this project does
 
 Chrome extension for Zoom transcript pages that:
