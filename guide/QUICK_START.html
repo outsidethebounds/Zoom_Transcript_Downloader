@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zoom Transcript Downloader Quick Start</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #536076;
+      --line: #d7dfeb;
+      --panel: #f5f7fb;
+      --accent: #1b5cff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: white;
+      line-height: 1.45;
+    }
+
+    main {
+      max-width: 8.5in;
+      margin: 0 auto;
+      padding: 0.55in 0.6in 0.7in;
+    }
+
+    h1,
+    h2 {
+      margin: 0 0 0.16in;
+      line-height: 1.15;
+    }
+
+    h1 {
+      font-size: 26px;
+      letter-spacing: -0.02em;
+    }
+
+    h2 {
+      font-size: 17px;
+      margin-top: 0.28in;
+    }
+
+    p,
+    li {
+      font-size: 12.5px;
+    }
+
+    .subhead {
+      margin: 0 0 0.22in;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.18in 0.2in;
+      background: var(--panel);
+      margin: 0.18in 0;
+    }
+
+    .steps {
+      margin: 0;
+      padding-left: 0.22in;
+    }
+
+    .steps li {
+      margin: 0 0 0.08in;
+      padding-left: 0.03in;
+    }
+
+    .inline-code {
+      font-family: "SFMono-Regular", Menlo, monospace;
+      background: #eef3ff;
+      border-radius: 6px;
+      padding: 1px 5px;
+      font-size: 11.5px;
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      padding-left: 0.14in;
+      margin: 0.18in 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.16in;
+    }
+
+    ul {
+      margin: 0.08in 0 0;
+      padding-left: 0.2in;
+    }
+
+    .footer {
+      margin-top: 0.34in;
+      padding-top: 0.15in;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    @media print {
+      @page {
+        margin: 0.45in;
+        size: letter;
+      }
+
+      main {
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Zoom Transcript Downloader</h1>
+    <p class="subhead">Quick start guide for version 2026.08</p>
+
+    <div class="card">
+      <strong>What it does</strong>
+      <p>This extension saves Zoom transcript text files directly with clean final names such as <span class="inline-code">2026-08-14 - 1601 - Google CEP Setup and Deep Dive.txt</span>.</p>
+    </div>
+
+    <h2>Use It</h2>
+    <ol class="steps">
+      <li>Open your Zoom transcript page in Edge or Chrome.</li>
+      <li>Click the <strong>Zoom Transcript Downloader</strong> extension icon.</li>
+      <li>If needed, click the gear icon to review settings.</li>
+      <li>Click <strong>Save all available</strong>.</li>
+      <li>Let the extension finish scanning all pages, then saving the transcripts.</li>
+    </ol>
+
+    <div class="note">
+      <strong>Expected behavior:</strong> the extension uses a two-pass workflow. It scans first so it can plan the final filenames, then it goes back and downloads the files in order.
+    </div>
+
+    <h2>Recommended Settings</h2>
+    <div class="grid">
+      <div class="card">
+        <strong>Filename pattern</strong>
+        <p>Recommended default:</p>
+        <p><span class="inline-code">{date} - {time} - {title}</span></p>
+      </div>
+      <div class="card">
+        <strong>Save folder inside Downloads</strong>
+        <p>Choose a clean subfolder under your normal Downloads folder.</p>
+        <p>Example: <span class="inline-code">Work/Zoom</span></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <strong>Include meeting ID</strong>
+      <p>Usually leave this off. Turn it on only if you want the meeting ID added to every filename.</p>
+    </div>
+
+    <h2>What You Should See</h2>
+    <ul>
+      <li>The extension resets to page 1.</li>
+      <li>It scans every transcript page.</li>
+      <li>It then downloads available transcripts one by one.</li>
+      <li>Unavailable or disabled transcript rows are skipped.</li>
+      <li>Finished files appear in your Downloads subfolder with the final filename already applied.</li>
+    </ul>
+
+    <h2>Troubleshooting</h2>
+    <div class="card">
+      <ul>
+        <li>If nothing happens, refresh the Zoom transcript page and try again.</li>
+        <li>If the run stops early, turn on <strong>Show debug</strong> and retry.</li>
+        <li>If Zoom’s list changes during the run, refresh and start over.</li>
+        <li>If you want help or repo details, click the <strong>?</strong> icon in the extension.</li>
+      </ul>
+    </div>
+
+    <p class="footer">Created by Blake Stover • GitHub repo link is available from the extension’s About window.</p>
+  </main>
+</body>
+</html>
