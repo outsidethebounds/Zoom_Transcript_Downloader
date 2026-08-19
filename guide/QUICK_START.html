@@ -6,12 +6,14 @@
   <title>Zoom Transcript Downloader Quick Start</title>
   <style>
     :root {
-      --ink: #172033;
-      --muted: #536076;
-      --line: #d7dfeb;
-      --panel: #f5f7fb;
-      --accent: #1b5cff;
-      --accent-soft: #eef3ff;
+      --ink: #18273c;
+      --muted: #57667d;
+      --line: #d8e0ec;
+      --panel: #f6f8fc;
+      --accent: #1f6fff;
+      --accent-soft: #eef4ff;
+      --tip: #fff6de;
+      --tip-line: #f0c15d;
     }
 
     * {
@@ -29,30 +31,24 @@
     main {
       max-width: 8.5in;
       margin: 0 auto;
-      padding: 0.45in 0.55in 0.65in;
+      padding: 0.46in 0.55in 0.6in;
     }
 
     h1,
-    h2,
-    h3 {
+    h2 {
       margin: 0;
       line-height: 1.15;
     }
 
     h1 {
-      font-size: 26px;
+      font-size: 28px;
       letter-spacing: -0.02em;
       margin-bottom: 0.08in;
     }
 
     h2 {
-      font-size: 18px;
+      font-size: 19px;
       margin: 0.28in 0 0.12in;
-    }
-
-    h3 {
-      font-size: 14px;
-      margin-bottom: 0.08in;
     }
 
     p,
@@ -61,17 +57,22 @@
     }
 
     .subhead {
-      margin: 0 0 0.2in;
+      margin: 0 0 0.18in;
       color: var(--muted);
       font-size: 13px;
     }
 
-    .hero {
-      border: 1px solid var(--line);
+    .hero,
+    .card,
+    .tip {
       border-radius: 16px;
       padding: 0.18in 0.2in;
+      margin: 0.16in 0;
+    }
+
+    .hero {
+      border: 1px solid var(--line);
       background: linear-gradient(180deg, #f8fbff 0%, #f2f6ff 100%);
-      margin-bottom: 0.18in;
     }
 
     .hero p {
@@ -80,10 +81,12 @@
 
     .card {
       border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 0.18in 0.2in;
       background: var(--panel);
-      margin: 0.16in 0;
+    }
+
+    .tip {
+      border: 1px solid var(--tip-line);
+      background: var(--tip);
     }
 
     .steps {
@@ -102,18 +105,6 @@
       border-radius: 6px;
       padding: 1px 5px;
       font-size: 11.5px;
-    }
-
-    .note {
-      border-left: 4px solid var(--accent);
-      padding-left: 0.14in;
-      margin: 0.18in 0;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.16in;
     }
 
     .screenshot {
@@ -141,6 +132,10 @@
       padding-left: 0.2in;
     }
 
+    a {
+      color: var(--accent);
+    }
+
     @media print {
       @page {
         margin: 0.4in;
@@ -156,96 +151,71 @@
 <body>
   <main>
     <h1>Zoom Transcript Downloader</h1>
-    <p class="subhead">Quick start guide for version 2026.08</p>
+    <p class="subhead">Quick Start for version 2026.08</p>
 
     <div class="hero">
-      <strong>Start here</strong>
-      <p>This guide is focused on getting to the correct Zoom transcript page first, then saving transcripts with the extension.</p>
+      <strong>The short version</strong>
+      <p>Install the extension, open Zoom's <strong>Transcripts</strong> page, click <strong>Save all available</strong>, and leave the tab open until the run finishes.</p>
     </div>
 
-    <h2>Get To The Right Zoom Page</h2>
+    <h2>1. Install</h2>
+    <div class="card">
+      <p><strong>Recommended:</strong> install from the direct Chrome Web Store link:</p>
+      <p><a href="https://chrome.google.com/webstore/detail/lbmejjnmnbjnoahehjfmhaiheopkgcdg">chrome.google.com/webstore/detail/lbmejjnmnbjnoahehjfmhaiheopkgcdg</a></p>
+      <p>If you use Microsoft Edge, allow extensions from other stores if Edge prompts you.</p>
+      <p>If you need manual installation instead, open <span class="inline-code">chrome://extensions</span> or <span class="inline-code">edge://extensions</span>, turn on <strong>Developer mode</strong>, select <strong>Load unpacked</strong>, and choose the extracted folder that contains <span class="inline-code">manifest.json</span>.</p>
+    </div>
+
+    <h2>2. Open Zoom</h2>
     <ol class="steps">
-      <li>Make sure you are logged into your Zoom account in Edge or Chrome.</li>
-      <li>Go to <span class="inline-code">https://your_company.zoom.us/recording/meeting/transcript</span>.</li>
-      <li>Wait for the <strong>Recordings and Transcripts</strong> page to load.</li>
-      <li>The extension window should automatically pop up in the upper-right corner of the page.</li>
-      <li>If it does not pop up, click the <strong>Zoom Transcript Downloader</strong> extension icon manually.</li>
+      <li>Sign in to your Zoom web portal.</li>
+      <li>Open the page that lists recording transcripts.</li>
+      <li>Select the <strong>Transcripts</strong> tab or view.</li>
+      <li>Confirm transcript rows are visible.</li>
     </ol>
 
     <div class="screenshot">
-      <img src="./zoom-transcript-page-anonymized.png" alt="Anonymized Zoom transcript page with the extension open in the upper right">
+      <img src="./zoom-transcript-page-anonymized.png" alt="Example Zoom Transcripts page with Zoom Transcript Downloader open in the upper-right area">
     </div>
-    <p class="caption">Example transcript page with the extension open. Sensitive meeting details in this example have been hidden.</p>
+    <p class="caption">Example Zoom Transcripts page with the extension panel open.</p>
 
-    <div class="note">
-      <strong>Tip:</strong> make sure you are on the <strong>Transcripts</strong> tab, not Cloud recordings or another Zoom section.
-    </div>
-
-    <h2>Save Your Transcripts</h2>
+    <h2>3. Download</h2>
     <ol class="steps">
-      <li>Review the count shown in the extension header.</li>
-      <li>If needed, click the gear icon to review settings first.</li>
+      <li>Wait for the Zoom Transcript Downloader panel to appear automatically.</li>
+      <li>If you previously closed it, reopen it from the browser Extensions menu.</li>
       <li>Click <strong>Save all available</strong>.</li>
-      <li>Let the extension finish scanning all pages, then saving the transcripts.</li>
+      <li>Keep the Zoom tab open while the extension works.</li>
     </ol>
 
-    <div class="card">
-      <strong>Expected behavior</strong>
-      <p>The extension uses a two-pass workflow on purpose. It scans all transcript pages first so it can plan clean final filenames, then it goes back and saves the files in order.</p>
+    <div class="tip">
+      <strong>Recommended:</strong> use a dedicated Downloads subfolder such as <span class="inline-code">Zoom Transcripts</span> to keep transcript files organized. This is optional.
     </div>
 
-    <h2>Recommended Settings</h2>
-    <div class="grid">
-      <div class="card">
-        <h3>Filename pattern</h3>
-        <p>Recommended default:</p>
-        <p><span class="inline-code">{date} - {time} - {title}</span></p>
-        <p>This produces filenames like <span class="inline-code">2026-08-14 - 1601 - Team Weekly Sync.txt</span>.</p>
-        <p>Supported pattern tokens:</p>
-        <ul>
-          <li><span class="inline-code">{date}</span> = meeting date in <span class="inline-code">YYYY-MM-DD</span></li>
-          <li><span class="inline-code">{time}</span> = meeting time in <span class="inline-code">HHMM</span></li>
-          <li><span class="inline-code">{title}</span> = cleaned meeting title</li>
-          <li><span class="inline-code">{meetingId}</span> = Zoom meeting ID</li>
-        </ul>
-        <p>Other characters in the pattern are allowed, but unsupported file characters are removed automatically.</p>
-        <p>Example patterns:</p>
-        <ul>
-          <li><span class="inline-code">{date} - {time} - {title}</span></li>
-          <li><span class="inline-code">{date} - {title}</span></li>
-          <li><span class="inline-code">{date} - {time} - {title} - {meetingId}</span></li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3>Save folder inside Downloads</h3>
-        <p>Choose a clean subfolder under your normal Downloads folder.</p>
-        <p>Example: <span class="inline-code">Work/Zoom</span></p>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>Include meeting ID</h3>
-      <p>Usually leave this off. Turn it on only if you want the meeting ID appended to each filename.</p>
-    </div>
-
-    <h2>What You Should See</h2>
-    <ul>
-      <li>The extension resets to page 1 before it begins the save run.</li>
-      <li>It scans every transcript page.</li>
-      <li>It then downloads available transcripts one by one.</li>
-      <li>Unavailable or disabled transcript rows are skipped automatically.</li>
-      <li>Finished files appear in your Downloads subfolder with the final filename already applied.</li>
-    </ul>
-
-    <h2>Troubleshooting</h2>
+    <h2>4. Wait</h2>
     <div class="card">
       <ul>
-        <li>If the extension does not appear, refresh the Zoom transcript page and click the extension icon manually.</li>
-        <li>If nothing happens after you click <strong>Save all available</strong>, refresh the page and try again.</li>
-        <li>If the run stops early, turn on <strong>Show debug</strong> and retry.</li>
-        <li>If Zoom’s list changes during the run, refresh the page and start over.</li>
-        <li>If you need help or repo details, click the <strong>?</strong> icon in the extension.</li>
+        <li>The extension works through the available transcript pages automatically.</li>
+        <li>It saves the transcripts Zoom currently allows.</li>
+        <li>It skips transcript rows that Zoom marks as unavailable.</li>
+        <li>If you need to stop, click <strong>Stop</strong>. The extension stops after the current item finishes.</li>
       </ul>
+    </div>
+
+    <h2>5. Find Your Files</h2>
+    <div class="card">
+      <p>Look in your browser's normal <strong>Downloads</strong> location and the subfolder you configured in <strong>Settings</strong>.</p>
+      <p>Example destination:</p>
+      <p><span class="inline-code">Downloads/Zoom Transcripts/ZoomTranscripts-08192026</span></p>
+    </div>
+
+    <h2>Problems?</h2>
+    <div class="card">
+      <ul>
+        <li>If the panel does not appear, refresh the Zoom page and reopen the extension from the browser Extensions menu.</li>
+        <li>If the browser prompts for every file, turn off the browser setting that asks where to save each file before downloading.</li>
+        <li>If the Zoom page changes while the run is in progress, refresh the page and start the batch again.</li>
+      </ul>
+      <p>See the full guide for complete setup, settings, troubleshooting, and update instructions.</p>
     </div>
   </main>
 </body>

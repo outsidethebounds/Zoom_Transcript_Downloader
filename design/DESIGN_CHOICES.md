@@ -91,6 +91,8 @@ Design decision:
 - support subfolders under `Downloads`
 - do not fake absolute-path selection
 
+The main panel should also make the active destination visible without forcing the user to open Settings.
+
 ## Settings UI
 
 The settings modal intentionally avoids raw JSON output.
@@ -104,9 +106,9 @@ Why:
 - examples are more useful than internal state dumps
 - the intended user flow is non-technical
 
-## Help/About modal
+## Help & About modal
 
-The `?` button now opens an in-page About modal.
+The `?` button now opens an in-page Help & About modal.
 
 It contains:
 - creator attribution

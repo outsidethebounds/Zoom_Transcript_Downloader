@@ -104,6 +104,11 @@
   background: #1f2937;
   border: 1px solid #4b5563;
 }
+#ztd-panel .ztd-destination-row {
+  margin-bottom: 10px;
+  color: #d1d5db;
+  font-size: 11px;
+}
 #ztd-panel pre,
 #ztd-settings-card pre,
 #ztd-pattern-help-card pre {

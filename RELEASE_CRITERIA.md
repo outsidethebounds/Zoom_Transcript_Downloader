@@ -12,7 +12,7 @@ This document defines what must be true before treating this private repo as a s
 ### Distribution
 - private repo
 - stable enough for repeated real-world use
-- not intended for Chrome Web Store packaging right now
+- distributed either through the direct Chrome Web Store listing or manual unpacked installation
 
 ### Supported environments
 - Chrome on macOS
@@ -24,7 +24,7 @@ This document defines what must be true before treating this private repo as a s
 ## Accepted workflow
 
 The accepted user workflow is:
-1. load unpacked extension
+1. install the extension from the Chrome Web Store link or by manual unpacked install
 2. open Zoom transcript page
 3. click **Save all available**
 4. wait for downloads to finish
@@ -61,7 +61,7 @@ The extension must:
 - default to collapsed panel state
 - keep debug mode hidden behind a toggle
 - provide a visible running-job notification during bulk download
-- provide an About/help affordance from the panel header
+- provide a Help & About affordance from the panel header
 - clearly communicate the chosen save location and filename pattern
 
 ### D. Documentation quality
@@ -79,7 +79,7 @@ The repo must contain:
 - [x] transcript count looks sane
 - [x] disabled transcript rows are skipped
 - [x] running-job notification appears when save-all starts
-- [x] About/help button opens the in-page About window
+- [x] Help & About button opens the in-page Help & About window
 - [x] settings save correctly
 
 ### Save-all validation
@@ -98,7 +98,7 @@ The repo must contain:
 
 ## Known acceptable limitations at release time
 These are acceptable for now if the core workflow is stable:
-- extension still distributed as unpacked extension
+- manual unpacked install remains necessary for development and some fallback installs
 - `content.js` remains large and not fully refactored
 - automated test coverage may remain basic/lightweight
 

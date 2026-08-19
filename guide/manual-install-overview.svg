@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860" role="img" aria-labelledby="title desc">
+  <title id="title">Manual installation overview</title>
+  <desc id="desc">Illustration of Chrome or Edge extensions page with Developer mode and Load unpacked highlighted.</desc>
+  <rect width="1400" height="860" fill="#eef3fb"/>
+  <rect x="56" y="48" width="1288" height="764" rx="28" fill="#ffffff" stroke="#cfd9ea" stroke-width="3"/>
+  <rect x="56" y="48" width="1288" height="64" rx="28" fill="#19324d"/>
+  <circle cx="98" cy="80" r="10" fill="#ff6f61"/>
+  <circle cx="128" cy="80" r="10" fill="#f7c948"/>
+  <circle cx="158" cy="80" r="10" fill="#43aa8b"/>
+  <rect x="222" y="63" width="882" height="34" rx="17" fill="#ffffff" opacity="0.96"/>
+  <text x="250" y="85" font-family="Arial, sans-serif" font-size="20" fill="#55657d">chrome://extensions or edge://extensions</text>
+  <text x="92" y="160" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#1c2c42">Extensions</text>
+  <rect x="980" y="144" width="296" height="56" rx="16" fill="#eff7ef" stroke="#7ac488" stroke-width="3"/>
+  <text x="1008" y="178" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#216e39">Developer mode: On</text>
+  <rect x="90" y="236" width="244" height="56" rx="16" fill="#1f6fff"/>
+  <text x="128" y="271" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">Load unpacked</text>
+  <rect x="362" y="236" width="198" height="56" rx="16" fill="#f2f5fa" stroke="#d7dfec" stroke-width="2"/>
+  <text x="412" y="271" font-family="Arial, sans-serif" font-size="24" fill="#4b5d75">Pack</text>
+  <rect x="584" y="236" width="286" height="56" rx="16" fill="#f2f5fa" stroke="#d7dfec" stroke-width="2"/>
+  <text x="630" y="271" font-family="Arial, sans-serif" font-size="24" fill="#4b5d75">Update</text>
+  <rect x="90" y="340" width="1180" height="342" rx="24" fill="#f8fbff" stroke="#d7dfec" stroke-width="2"/>
+  <rect x="126" y="382" width="1108" height="118" rx="22" fill="#ffffff" stroke="#d7dfec" stroke-width="2"/>
+  <text x="158" y="427" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#1c2c42">Zoom Transcript Downloader</text>
+  <text x="158" y="470" font-family="Arial, sans-serif" font-size="22" fill="#55657d">Version 2026.08</text>
+  <rect x="1048" y="408" width="140" height="48" rx="14" fill="#f2f5fa" stroke="#d7dfec" stroke-width="2"/>
+  <text x="1082" y="439" font-family="Arial, sans-serif" font-size="22" fill="#4b5d75">Details</text>
+  <rect x="126" y="528" width="1108" height="118" rx="22" fill="#ffffff" stroke="#d7dfec" stroke-width="2" stroke-dasharray="8 8"/>
+  <text x="158" y="573" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#1c2c42">Choose the extracted folder that contains manifest.json</text>
+  <text x="158" y="614" font-family="Arial, sans-serif" font-size="22" fill="#55657d">Do not select the ZIP file itself.</text>
+  <path d="M330 292 L330 350" stroke="#1f6fff" stroke-width="6" stroke-linecap="round"/>
+  <polygon points="330,370 314,340 346,340" fill="#1f6fff"/>
+  <path d="M1128 200 C1128 248 1086 282 1020 282" stroke="#2d8cff" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <polygon points="996,282 1028,266 1028,298" fill="#2d8cff"/>
+  <rect x="70" y="710" width="1260" height="92" rx="24" fill="#fff7e8" stroke="#f0c36d" stroke-width="3"/>
+  <text x="104" y="754" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#7b4b00">Manual install flow:</text>
+  <text x="370" y="754" font-family="Arial, sans-serif" font-size="28" fill="#7b4b00">Extract the package, open Extensions, turn on Developer mode, click Load unpacked, then choose the folder containing manifest.json.</text>
+</svg>

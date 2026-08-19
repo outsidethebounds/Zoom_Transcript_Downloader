@@ -62,13 +62,13 @@
   - fewer silent partial failures
   - more conservative behavior
 
-## 8. Require a clean download folder
+## 8. Recommend a dedicated transcript folder, but do not require one
 - **Session context:** User specified in this session
 - **Status:** Active
-- **Decision:** Product documentation and workflow assume a clean transcript download folder.
+- **Decision:** Recommend a dedicated transcript folder for organization, but do not require an empty or isolated folder.
 - **Consequences:**
-  - simpler, safer bulk-save runs
-  - user must manage download folder hygiene
+  - docs can encourage tidy organization without overstating a technical requirement
+  - user workflow stays simple and honest
 
 ## 10. Keep debug mode, but behind a toggle
 - **Session context:** User specified in this session
@@ -86,13 +86,13 @@
   - code may become more complex
   - UI/workflow should remain constrained and clear
 
-## 12. Keep project private and stable, not Chrome Web Store oriented
+## 12. Support both direct-link Web Store install and manual install
 - **Session context:** User specified in this session
 - **Status:** Active
-- **Decision:** Stable private repo, not web-store packaging work.
+- **Decision:** Treat the direct Chrome Web Store listing as the recommended install path, while keeping manual Load unpacked installation fully documented for development, testing, and fallback use.
 - **Consequences:**
-  - less packaging overhead
-  - still acceptable to rely on unpacked-extension workflow
+  - end-user docs should present the Web Store first
+  - manual install remains part of the supported workflow
 
 ## 13. Treat unavailable transcript rows as first-class UI state
 - **Session context:** Release hardening / bug-fix pass

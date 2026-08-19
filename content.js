@@ -118,6 +118,10 @@ function renderSettingsPreview(modal) {
   modal.querySelector('#ztd-settings-folder-example').textContent = `Downloads/${buildDownloadFolderPath(currentDownloadSubfolder(modal))}`;
 }
 
+function currentDestinationPreview(settings = currentSettings) {
+  return `Downloads/${buildDownloadFolderPath(settings?.downloadSubfolder || '')}`;
+}
+
 function scanRows() {
   return scanTranscriptRows({
     rowSelector: ROW_SELECTOR,
@@ -258,6 +262,10 @@ function setSaveAllRunning(isRunning) {
 
 function updatePanelSummary() {
   const out = document.getElementById('ztd-output');
+  const destination = document.getElementById('ztd-destination');
+  if (destination && currentSettings) {
+    destination.textContent = currentDestinationPreview();
+  }
   if (!out || !currentSettings) return;
   if (stickyPanelMessage) {
     out.textContent = typeof stickyPanelMessage === 'string' ? stickyPanelMessage : JSON.stringify(stickyPanelMessage, null, 2);
@@ -339,7 +347,7 @@ function ensureAboutModal() {
     modal.innerHTML = `
       <div id="ztd-about-card">
         <div class="ztd-help-actions">
-          <strong>About</strong>
+          <strong>Help & About</strong>
           <button type="button" class="ztd-secondary" id="ztd-about-close">Close</button>
         </div>
         <div class="ztd-about-body">
@@ -365,7 +373,7 @@ function ensureSettingsModal() {
     modal.innerHTML = `
       <div id="ztd-settings-card">
         <div class="ztd-settings-actions">
-          <strong>Zoom Downloader Settings</strong>
+          <strong>Settings</strong>
           <button type="button" class="ztd-secondary" id="ztd-settings-close">Close</button>
         </div>
         <label>Filename pattern <button type="button" class="ztd-secondary" id="ztd-pattern-help">?</button>
@@ -375,7 +383,7 @@ function ensureSettingsModal() {
         <label>Save folder inside Downloads
           <input type="text" id="ztd-settings-subfolder" placeholder="Optional, for example Work/Zoom" />
         </label>
-        <div class="ztd-settings-note">Files can be routed into a subfolder under the browser Downloads folder. Arbitrary absolute folder selection is not supported by this download API.</div>
+        <div class="ztd-settings-note">Files save inside your browser's normal Downloads location. For security reasons, browser extensions cannot choose any folder on your computer.</div>
         <div><strong>Files will save to:</strong> <span id="ztd-settings-folder-example"></span></div>
         <label><input type="checkbox" id="ztd-settings-include-meeting-id" /> Include meeting ID in every filename</label>
         <div class="ztd-settings-actions">
@@ -592,7 +600,7 @@ function renderPanel(rows, settings) {
         </div>
         <div class="ztd-header-right">
           <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-settings" title="Settings">⚙</button>
-          <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-readme-help" title="About">?</button>
+          <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-readme-help" title="Help & About">?</button>
           <button type="button" class="ztd-secondary" id="ztd-collapse">Expand</button>
           <button type="button" class="ztd-secondary" id="ztd-close">Close</button>
         </div>
@@ -601,6 +609,7 @@ function renderPanel(rows, settings) {
         <button type="button" id="ztd-save-all">Save all available</button>
         <button type="button" class="ztd-secondary" id="ztd-stop-save-all">Stop</button>
       </div>
+      <div class="ztd-destination-row"><strong>Saving to:</strong> <span id="ztd-destination"></span></div>
       <pre id="ztd-output"></pre>
       <div class="ztd-spacer" style="height:10px"></div>
       <div class="ztd-debug-row">

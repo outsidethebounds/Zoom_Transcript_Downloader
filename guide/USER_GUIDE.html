@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zoom Transcript Downloader User Guide</title>
+  <style>
+    :root {
+      --ink: #17263b;
+      --muted: #5b6980;
+      --line: #d6deea;
+      --surface: #f6f8fc;
+      --surface-strong: #eef4ff;
+      --accent: #1f6fff;
+      --accent-dark: #184fbc;
+      --tip: #fff6de;
+      --tip-line: #efc15b;
+      --success: #effaf2;
+      --success-line: #75c58c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #edf2f8;
+      line-height: 1.45;
+    }
+
+    main {
+      max-width: 8.5in;
+      margin: 0 auto;
+      padding: 0.42in 0.52in 0.6in;
+      background: white;
+      box-shadow: 0 20px 60px rgba(24, 38, 59, 0.08);
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.15;
+    }
+
+    h1 {
+      font-size: 29px;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.08in;
+    }
+
+    h2 {
+      font-size: 20px;
+      margin: 0.3in 0 0.12in;
+    }
+
+    h3 {
+      font-size: 15px;
+      margin: 0.18in 0 0.1in;
+    }
+
+    p,
+    li,
+    td,
+    th {
+      font-size: 12.2px;
+    }
+
+    .subhead {
+      margin: 0 0 0.18in;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .hero {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 0.22in 0.22in;
+      background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
+      margin-bottom: 0.18in;
+    }
+
+    .hero p {
+      margin: 0.08in 0 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.18in;
+    }
+
+    .card,
+    .tip,
+    .good {
+      border-radius: 16px;
+      padding: 0.18in 0.2in;
+      margin: 0.16in 0;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .tip {
+      border: 1px solid var(--tip-line);
+      background: var(--tip);
+    }
+
+    .good {
+      border: 1px solid var(--success-line);
+      background: var(--success);
+    }
+
+    .steps,
+    .bullets {
+      margin: 0.08in 0 0;
+      padding-left: 0.22in;
+    }
+
+    .steps li,
+    .bullets li {
+      margin: 0 0 0.08in;
+    }
+
+    .inline-code {
+      font-family: "SFMono-Regular", Menlo, monospace;
+      background: var(--surface-strong);
+      border-radius: 6px;
+      padding: 1px 5px;
+      font-size: 11.2px;
+    }
+
+    .shot {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      overflow: hidden;
+      background: white;
+      margin: 0.18in 0 0.08in;
+    }
+
+    .shot img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .caption {
+      margin: 0.06in 0 0;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.1in;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f2f6fb;
+    }
+
+    .section-kicker {
+      color: var(--accent-dark);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 0.06in;
+    }
+
+    .footer-note {
+      margin-top: 0.24in;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    @media print {
+      @page {
+        margin: 0.35in;
+        size: letter;
+      }
+
+      body {
+        background: white;
+      }
+
+      main {
+        box-shadow: none;
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Zoom Transcript Downloader User Guide</h1>
+    <p class="subhead">Version 2026.08</p>
+
+    <div class="hero">
+      <strong>The main workflow</strong>
+      <p>Open your Zoom <strong>Transcripts</strong> page, wait for the panel to appear, click <strong>Save all available</strong>, and keep the tab open until the run finishes.</p>
+    </div>
+
+    <div class="section-kicker">1. Install</div>
+    <h2>Choose The Installation Method</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Recommended: Chrome Web Store</h3>
+        <ol class="steps">
+          <li>Open the direct listing link.</li>
+          <li>Select <strong>Add to Chrome</strong>.</li>
+          <li>Approve the install prompt.</li>
+          <li>Confirm the extension appears in the browser Extensions menu.</li>
+        </ol>
+        <p><span class="inline-code">https://chrome.google.com/webstore/detail/lbmejjnmnbjnoahehjfmhaiheopkgcdg</span></p>
+        <p>This listing is private or unlisted, so users normally open it from the direct link.</p>
+      </div>
+      <div class="card">
+        <h3>Alternative: Manual Install</h3>
+        <ol class="steps">
+          <li>Download the package and extract it if it is a ZIP file.</li>
+          <li>Open <span class="inline-code">chrome://extensions</span> or <span class="inline-code">edge://extensions</span>.</li>
+          <li>Turn on <strong>Developer mode</strong>.</li>
+          <li>Select <strong>Load unpacked</strong>.</li>
+          <li>Choose the extracted folder that contains <span class="inline-code">manifest.json</span>.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="shot">
+      <img src="./manual-install-overview.svg" alt="Manual installation overview showing Developer mode and Load unpacked on the browser Extensions page">
+    </div>
+    <p class="caption">Manual installation overview for Chrome or Edge.</p>
+
+    <div class="tip">
+      <strong>Microsoft Edge:</strong> if you install from the Chrome Web Store in Edge, allow extensions from other stores if Edge prompts you.
+    </div>
+
+    <div class="section-kicker">2. Open Zoom</div>
+    <h2>Go To The Correct Zoom Page</h2>
+    <ol class="steps">
+      <li>Sign in to your Zoom web portal.</li>
+      <li>Open the area that contains recording transcripts.</li>
+      <li>Select the <strong>Transcripts</strong> tab or view.</li>
+      <li>Confirm transcript rows are visible.</li>
+    </ol>
+    <p>Example URL format: <span class="inline-code">https://your-company.zoom.us/recording/meeting/transcript</span></p>
+
+    <div class="shot">
+      <img src="./zoom-transcript-page-anonymized.png" alt="Example Zoom Transcripts page with the extension panel in the upper-right area">
+    </div>
+    <p class="caption">Example Zoom Transcripts page. Your Zoom hostname and layout may vary.</p>
+
+    <div class="good">
+      <strong>Expected behavior:</strong> the panel should appear automatically when you open a supported Zoom Transcripts page. If you closed it earlier, reopen it from the browser Extensions menu.
+    </div>
+
+    <div class="section-kicker">3. Download</div>
+    <h2>Save All Available Transcripts</h2>
+    <ol class="steps">
+      <li>Open the Zoom <strong>Transcripts</strong> page.</li>
+      <li>Confirm the Zoom Transcript Downloader panel is visible.</li>
+      <li>Click <strong>Save all available</strong>.</li>
+      <li>Keep the Zoom tab open while the extension works.</li>
+      <li>Wait for the completion message.</li>
+    </ol>
+
+    <div class="shot">
+      <img src="./panel-overview.svg" alt="Main extension panel showing Save all available, status, destination, Settings, and Help and About">
+    </div>
+    <p class="caption">The main panel keeps the primary workflow short and visible.</p>
+
+    <div class="card">
+      <h3>What happens automatically</h3>
+      <ul class="bullets">
+        <li>The extension returns to page 1 before starting.</li>
+        <li>It reviews the transcript pages to plan final filenames.</li>
+        <li>It saves the transcript text files Zoom currently allows.</li>
+        <li>It skips transcript rows that Zoom marks as unavailable.</li>
+        <li>It reports the result when finished.</li>
+      </ul>
+    </div>
+
+    <div class="section-kicker">4. Find Files</div>
+    <h2>Where Your Files Go</h2>
+    <p>Files save inside your browser's normal <strong>Downloads</strong> location. You can choose a folder underneath Downloads, such as <span class="inline-code">Zoom Transcripts</span> or <span class="inline-code">Work/Zoom</span>.</p>
+    <div class="tip">
+      <strong>Recommended:</strong> use a dedicated transcript folder for organization. This is optional and not required for the extension to work.
+    </div>
+
+    <div class="section-kicker">5. Customize</div>
+    <h2>Customize File Names And Download Location</h2>
+    <div class="shot">
+      <img src="./settings-overview.svg" alt="Settings dialog showing filename pattern, preview, Downloads subfolder, destination preview, and Meeting ID option">
+    </div>
+    <p class="caption">Use Settings to control filenames and the Downloads subfolder.</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Default filename</h3>
+        <p><span class="inline-code">{date} - {time} - {title}</span></p>
+        <p>Example result: <span class="inline-code">2026-08-14 - 1601 - Team Weekly Sync.txt</span></p>
+      </div>
+      <div class="card">
+        <h3>Meeting ID</h3>
+        <p>Meeting ID is optional by default. The extension adds it automatically if two transcripts would otherwise receive the same filename.</p>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Placeholder</th>
+          <th>Meaning</th>
+          <th>Example</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="inline-code">{date}</span></td>
+          <td>Meeting date</td>
+          <td><span class="inline-code">2026-08-14</span></td>
+        </tr>
+        <tr>
+          <td><span class="inline-code">{time}</span></td>
+          <td>Meeting time</td>
+          <td><span class="inline-code">1601</span></td>
+        </tr>
+        <tr>
+          <td><span class="inline-code">{title}</span></td>
+          <td>Zoom meeting title</td>
+          <td><span class="inline-code">Team Weekly Sync</span></td>
+        </tr>
+        <tr>
+          <td><span class="inline-code">{meetingId}</span></td>
+          <td>Zoom meeting ID</td>
+          <td><span class="inline-code">12345678901</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="card">
+      <h3>Use the previews</h3>
+      <p>The Settings dialog shows both a filename preview and a destination preview. Check them before you save your settings.</p>
+    </div>
+
+    <div class="section-kicker">6. Troubleshooting</div>
+    <h2>Common Problems</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Panel does not appear</h3>
+        <ul class="bullets">
+          <li>Confirm you are on the Zoom <strong>Transcripts</strong> page.</li>
+          <li>Refresh the page.</li>
+          <li>Make sure the extension is installed and enabled.</li>
+          <li>Reopen it from the browser Extensions menu.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>No transcripts are found</h3>
+        <ul class="bullets">
+          <li>Make sure transcript rows are visible in Zoom.</li>
+          <li>Confirm you are on <strong>Transcripts</strong>, not another recordings view.</li>
+          <li>Refresh the page and wait for the list to finish loading.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Browser prompts for every file</h3>
+        <ul class="bullets">
+          <li>Open the browser download settings.</li>
+          <li>Turn off the setting that asks where to save each file before downloading.</li>
+          <li>Run the batch again.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Page changed during the run</h3>
+        <ul class="bullets">
+          <li>Refresh the Zoom page.</li>
+          <li>Wait for the transcript list to finish loading.</li>
+          <li>Start <strong>Save all available</strong> again.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Advanced troubleshooting</h3>
+      <p>Use <strong>Show debug</strong> only when you are reporting a problem. The debug view may include meeting titles, meeting IDs, page information, and Zoom page URLs.</p>
+    </div>
+
+    <div class="section-kicker">7. Updates</div>
+    <h2>Keep The Extension Current</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Chrome Web Store install</h3>
+        <p>Browser-installed extensions normally update automatically.</p>
+      </div>
+      <div class="card">
+        <h3>Manual install</h3>
+        <ol class="steps">
+          <li>Update the local extension files.</li>
+          <li>Open <span class="inline-code">chrome://extensions</span> or <span class="inline-code">edge://extensions</span>.</li>
+          <li>Select <strong>Reload</strong> for Zoom Transcript Downloader.</li>
+          <li>Refresh the Zoom page.</li>
+        </ol>
+      </div>
+    </div>
+
+    <p class="footer-note">Need the complete markdown version? See <span class="inline-code">USER_GUIDE.md</span> in the repository. Need a faster summary? Use <span class="inline-code">guide/QUICK_START.html</span>.</p>
+  </main>
+</body>
+</html>
