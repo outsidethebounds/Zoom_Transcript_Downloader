@@ -141,14 +141,6 @@
       padding-left: 0.2in;
     }
 
-    .footer {
-      margin-top: 0.32in;
-      padding-top: 0.14in;
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 11px;
-    }
-
     @media print {
       @page {
         margin: 0.4in;
@@ -208,7 +200,21 @@
         <h3>Filename pattern</h3>
         <p>Recommended default:</p>
         <p><span class="inline-code">{date} - {time} - {title}</span></p>
-        <p>This produces filenames like <span class="inline-code">2026-08-14 - 1601 - Google CEP Setup and Deep Dive.txt</span>.</p>
+        <p>This produces filenames like <span class="inline-code">2026-08-14 - 1601 - Team Weekly Sync.txt</span>.</p>
+        <p>Supported pattern tokens:</p>
+        <ul>
+          <li><span class="inline-code">{date}</span> = meeting date in <span class="inline-code">YYYY-MM-DD</span></li>
+          <li><span class="inline-code">{time}</span> = meeting time in <span class="inline-code">HHMM</span></li>
+          <li><span class="inline-code">{title}</span> = cleaned meeting title</li>
+          <li><span class="inline-code">{meetingId}</span> = Zoom meeting ID</li>
+        </ul>
+        <p>Other characters in the pattern are allowed, but unsupported file characters are removed automatically.</p>
+        <p>Example patterns:</p>
+        <ul>
+          <li><span class="inline-code">{date} - {time} - {title}</span></li>
+          <li><span class="inline-code">{date} - {title}</span></li>
+          <li><span class="inline-code">{date} - {time} - {title} - {meetingId}</span></li>
+        </ul>
       </div>
       <div class="card">
         <h3>Save folder inside Downloads</h3>
@@ -241,8 +247,6 @@
         <li>If you need help or repo details, click the <strong>?</strong> icon in the extension.</li>
       </ul>
     </div>
-
-    <p class="footer">Created by Blake Stover • GitHub repo link is available from the extension’s About window.</p>
   </main>
 </body>
 </html>
