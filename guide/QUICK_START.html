@@ -11,6 +11,7 @@
       --line: #d7dfeb;
       --panel: #f5f7fb;
       --accent: #1b5cff;
+      --accent-soft: #eef3ff;
     }
 
     * {
@@ -28,23 +29,30 @@
     main {
       max-width: 8.5in;
       margin: 0 auto;
-      padding: 0.55in 0.6in 0.7in;
+      padding: 0.45in 0.55in 0.65in;
     }
 
     h1,
-    h2 {
-      margin: 0 0 0.16in;
+    h2,
+    h3 {
+      margin: 0;
       line-height: 1.15;
     }
 
     h1 {
       font-size: 26px;
       letter-spacing: -0.02em;
+      margin-bottom: 0.08in;
     }
 
     h2 {
-      font-size: 17px;
-      margin-top: 0.28in;
+      font-size: 18px;
+      margin: 0.28in 0 0.12in;
+    }
+
+    h3 {
+      font-size: 14px;
+      margin-bottom: 0.08in;
     }
 
     p,
@@ -53,9 +61,21 @@
     }
 
     .subhead {
-      margin: 0 0 0.22in;
+      margin: 0 0 0.2in;
       color: var(--muted);
       font-size: 13px;
+    }
+
+    .hero {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 0.18in 0.2in;
+      background: linear-gradient(180deg, #f8fbff 0%, #f2f6ff 100%);
+      margin-bottom: 0.18in;
+    }
+
+    .hero p {
+      margin: 0.08in 0 0;
     }
 
     .card {
@@ -63,7 +83,7 @@
       border-radius: 14px;
       padding: 0.18in 0.2in;
       background: var(--panel);
-      margin: 0.18in 0;
+      margin: 0.16in 0;
     }
 
     .steps {
@@ -78,7 +98,7 @@
 
     .inline-code {
       font-family: "SFMono-Regular", Menlo, monospace;
-      background: #eef3ff;
+      background: var(--accent-soft);
       border-radius: 6px;
       padding: 1px 5px;
       font-size: 11.5px;
@@ -96,14 +116,34 @@
       gap: 0.16in;
     }
 
+    .screenshot {
+      margin: 0.18in 0 0.08in;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      background: white;
+    }
+
+    .screenshot img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .caption {
+      margin: 0.08in 0 0;
+      color: var(--muted);
+      font-size: 11.5px;
+    }
+
     ul {
       margin: 0.08in 0 0;
       padding-left: 0.2in;
     }
 
     .footer {
-      margin-top: 0.34in;
-      padding-top: 0.15in;
+      margin-top: 0.32in;
+      padding-top: 0.14in;
       border-top: 1px solid var(--line);
       color: var(--muted);
       font-size: 11px;
@@ -111,7 +151,7 @@
 
     @media print {
       @page {
-        margin: 0.45in;
+        margin: 0.4in;
         size: letter;
       }
 
@@ -126,59 +166,79 @@
     <h1>Zoom Transcript Downloader</h1>
     <p class="subhead">Quick start guide for version 2026.08</p>
 
-    <div class="card">
-      <strong>What it does</strong>
-      <p>This extension saves Zoom transcript text files directly with clean final names such as <span class="inline-code">2026-08-14 - 1601 - Google CEP Setup and Deep Dive.txt</span>.</p>
+    <div class="hero">
+      <strong>Start here</strong>
+      <p>This guide is focused on getting to the correct Zoom transcript page first, then saving transcripts with the extension.</p>
     </div>
 
-    <h2>Use It</h2>
+    <h2>Get To The Right Zoom Page</h2>
     <ol class="steps">
-      <li>Open your Zoom transcript page in Edge or Chrome.</li>
-      <li>Click the <strong>Zoom Transcript Downloader</strong> extension icon.</li>
-      <li>If needed, click the gear icon to review settings.</li>
+      <li>Make sure you are logged into your Zoom account in Edge or Chrome.</li>
+      <li>Go to <span class="inline-code">https://your_company.zoom.us/recording/meeting/transcript</span>.</li>
+      <li>Wait for the <strong>Recordings and Transcripts</strong> page to load.</li>
+      <li>The extension window should automatically pop up in the upper-right corner of the page.</li>
+      <li>If it does not pop up, click the <strong>Zoom Transcript Downloader</strong> extension icon manually.</li>
+    </ol>
+
+    <div class="screenshot">
+      <img src="./zoom-transcript-page-anonymized.png" alt="Anonymized Zoom transcript page with the extension open in the upper right">
+    </div>
+    <p class="caption">Example transcript page with the extension open. Sensitive meeting details in this example have been hidden.</p>
+
+    <div class="note">
+      <strong>Tip:</strong> make sure you are on the <strong>Transcripts</strong> tab, not Cloud recordings or another Zoom section.
+    </div>
+
+    <h2>Save Your Transcripts</h2>
+    <ol class="steps">
+      <li>Review the count shown in the extension header.</li>
+      <li>If needed, click the gear icon to review settings first.</li>
       <li>Click <strong>Save all available</strong>.</li>
       <li>Let the extension finish scanning all pages, then saving the transcripts.</li>
     </ol>
 
-    <div class="note">
-      <strong>Expected behavior:</strong> the extension uses a two-pass workflow. It scans first so it can plan the final filenames, then it goes back and downloads the files in order.
+    <div class="card">
+      <strong>Expected behavior</strong>
+      <p>The extension uses a two-pass workflow on purpose. It scans all transcript pages first so it can plan clean final filenames, then it goes back and saves the files in order.</p>
     </div>
 
     <h2>Recommended Settings</h2>
     <div class="grid">
       <div class="card">
-        <strong>Filename pattern</strong>
+        <h3>Filename pattern</h3>
         <p>Recommended default:</p>
         <p><span class="inline-code">{date} - {time} - {title}</span></p>
+        <p>This produces filenames like <span class="inline-code">2026-08-14 - 1601 - Google CEP Setup and Deep Dive.txt</span>.</p>
       </div>
       <div class="card">
-        <strong>Save folder inside Downloads</strong>
+        <h3>Save folder inside Downloads</h3>
         <p>Choose a clean subfolder under your normal Downloads folder.</p>
         <p>Example: <span class="inline-code">Work/Zoom</span></p>
       </div>
     </div>
 
     <div class="card">
-      <strong>Include meeting ID</strong>
-      <p>Usually leave this off. Turn it on only if you want the meeting ID added to every filename.</p>
+      <h3>Include meeting ID</h3>
+      <p>Usually leave this off. Turn it on only if you want the meeting ID appended to each filename.</p>
     </div>
 
     <h2>What You Should See</h2>
     <ul>
-      <li>The extension resets to page 1.</li>
+      <li>The extension resets to page 1 before it begins the save run.</li>
       <li>It scans every transcript page.</li>
       <li>It then downloads available transcripts one by one.</li>
-      <li>Unavailable or disabled transcript rows are skipped.</li>
+      <li>Unavailable or disabled transcript rows are skipped automatically.</li>
       <li>Finished files appear in your Downloads subfolder with the final filename already applied.</li>
     </ul>
 
     <h2>Troubleshooting</h2>
     <div class="card">
       <ul>
-        <li>If nothing happens, refresh the Zoom transcript page and try again.</li>
+        <li>If the extension does not appear, refresh the Zoom transcript page and click the extension icon manually.</li>
+        <li>If nothing happens after you click <strong>Save all available</strong>, refresh the page and try again.</li>
         <li>If the run stops early, turn on <strong>Show debug</strong> and retry.</li>
-        <li>If Zoom’s list changes during the run, refresh and start over.</li>
-        <li>If you want help or repo details, click the <strong>?</strong> icon in the extension.</li>
+        <li>If Zoom’s list changes during the run, refresh the page and start over.</li>
+        <li>If you need help or repo details, click the <strong>?</strong> icon in the extension.</li>
       </ul>
     </div>
 
