@@ -28,8 +28,7 @@ The accepted user workflow is:
 2. open Zoom transcript page
 3. click **Save all available**
 4. wait for downloads to finish
-5. click **Generate rename kit**
-6. run generated script in a clean download folder
+5. confirm the transcript files were saved with the expected names in the chosen Downloads subfolder
 
 This workflow is acceptable as long as the instructions remain clear and accurate.
 
@@ -46,25 +45,24 @@ The extension must:
 - not loop indefinitely across pages
 - support starting from a non-first page without producing a partial run
 
-### B. Rename kit reliability
+### B. Direct-save and filename reliability
 The extension must:
-- generate a manifest JSON and OS-specific script after a successful run
-- use observed browser download filenames rather than raw mtime ordering
-- fail closed if source-file matching is unreliable
+- save one final `.txt` file per transcript directly from the extension workflow
+- suppress or clean up duplicate native Zoom downloads during bulk saves
 - use default filename format:
   - `date - time - title`
+- apply the configured filename pattern to final saved files
+- support saving into a user-configured Downloads subfolder
 - append meeting ID on collisions
 - support optional meeting ID inclusion in every filename
 
 ### C. End-user usability
 The extension must:
 - default to collapsed panel state
-- default target OS based on install platform
 - keep debug mode hidden behind a toggle
 - provide a visible running-job notification during bulk download
-- provide a README/help affordance from the panel header
-- provide clear script execution instructions for macOS and Windows
-- clearly communicate the clean-folder requirement
+- provide an About/help affordance from the panel header
+- clearly communicate the chosen save location and filename pattern
 
 ### D. Documentation quality
 The repo must contain:
@@ -81,7 +79,7 @@ The repo must contain:
 - [x] transcript count looks sane
 - [x] disabled transcript rows are skipped
 - [x] running-job notification appears when save-all starts
-- [x] README/help button opens the GitHub README
+- [x] About/help button opens the in-page About window
 - [x] settings save correctly
 
 ### Save-all validation
@@ -89,27 +87,25 @@ The repo must contain:
 - [x] starting on page 2+ resets correctly and still completes full run
 - [x] multi-page download goes past 15 items
 - [x] stop button works during run
-- [x] manifest resets between runs
+- [x] planned filenames stay stable across the full batch
 
-### Rename-kit validation
-- [x] manifest downloads
-- [x] script downloads
-- [x] macOS script executes successfully
-- [x] Windows script executes successfully via PowerShell bypass command
-- [x] renamed output matches expected filenames
+### Direct-save validation
+- [x] exactly one final transcript file is kept per row
+- [x] final output matches expected filenames
+- [x] configured filename pattern is applied to saved files
+- [x] configured Downloads subfolder is applied to saved files
 - [x] collision handling appends meeting ID when needed
 
 ## Known acceptable limitations at release time
 These are acceptable for now if the core workflow is stable:
 - extension still distributed as unpacked extension
 - `content.js` remains large and not fully refactored
-- legacy files may remain in repo if documented clearly
 - automated test coverage may remain basic/lightweight
 
 ## Not acceptable at release time
 These are blockers:
 - stopping after page 1 during a normal multi-page run
-- generating a rename kit from incomplete or silently wrong source matching
-- silently renaming the wrong files
+- saving duplicate transcript files for one row
+- silently saving the wrong final filename
 - requiring hidden/manual debugging knowledge for normal use
 - docs that contradict actual workflow

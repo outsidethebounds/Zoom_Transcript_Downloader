@@ -9,8 +9,6 @@ This extension helps you:
 - skip entries where Zoom shows a disabled or greyed-out download button
 - save the files directly with clean final filenames
 
-There is no separate rename step in v2.
-
 ## Important rule before you start
 
 Use a **clean folder** for transcript downloads.
@@ -76,6 +74,8 @@ Example:
 `Downloads/Work/Zoom/ZoomTranscripts-08182026`
 
 The browser download API used here does not allow the extension to pick an arbitrary absolute folder on disk.
+
+The filename pattern and save-folder settings both apply to the actual saved files.
 
 ### Optional meeting ID
 Meeting ID is **not** included by default.

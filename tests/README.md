@@ -20,8 +20,7 @@ node tests/logic.test.mjs
 
 - real DOM interaction
 - paginator traversal
-- browser download observation
-- generated artifact downloads
-- end-to-end script execution
+- extension-managed save flow
+- end-to-end browser execution
 
 These tests are meant as regression protection for the pure logic only.

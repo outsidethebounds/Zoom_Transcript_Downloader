@@ -47,7 +47,7 @@ For each transcript during save-all:
 - page hook captures transcript response data
 - background cancels the native Zoom download
 - extension saves one final `.txt` file with the planned filename
-- no rename script is needed afterward
+- the configured Downloads subfolder is applied to the saved file path
 
 ### 5. Collision behavior
 Verify:

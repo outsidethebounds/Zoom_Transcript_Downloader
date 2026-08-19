@@ -13,7 +13,7 @@ Chrome extension for Zoom transcript pages that:
 - downloads all available transcript `.txt` files across paginated Zoom results
 - resets to page 1 before bulk download to make the run deterministic
 - plans final filenames across the whole run before saving
-- saves transcripts directly with their final names instead of generating a rename script
+- saves transcripts directly with the final filenames and download-folder structure you choose
 
 ## Who it is for
 
@@ -28,11 +28,12 @@ Chrome extension for Zoom transcript pages that:
 - Automatic run reset before each save-all
 - Skips greyed-out / unavailable transcript rows and reports how many were unavailable on the current page
 - Configurable filename pattern
+- Configurable save folder inside Downloads
 - Optional meeting ID in filenames
 - Collision handling by appending meeting ID when needed
 - Direct-save workflow using transcript content captured from the Zoom page
 - Running-job notifications in the page UI while bulk download is active
-- README help button (`?`) in the panel header
+- About/help button (`?`) in the panel header
 - Debug mode hidden behind a toggle
 
 ## How to run it
@@ -89,5 +90,5 @@ zoom-transcript-extension/
 ├── design/
 │   ├── README.md
 │   └── DESIGN_CHOICES.md
-└── handoff/
+└── tests/
 ```
