@@ -824,6 +824,10 @@ async function boot(verbose = false) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'zoomTranscriptExtension:ping') {
+    sendResponse({ ok: true });
+    return false;
+  }
   if (message?.type === 'zoomTranscriptExtension:openPanel') {
     boot(true).then(() => sendResponse({ ok: true })).catch(error => sendResponse({ ok: false, error: String(error) }));
     return true;

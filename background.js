@@ -6,6 +6,13 @@ const BASE_DEFAULTS = {
 };
 
 const ACTIVE_HOST_RE = /^https:\/\/(?:[^/]+\.)?zoom\.us\/recording\/meeting\/transcript/i;
+const CONTENT_SCRIPT_FILES = [
+  'lib/core.js',
+  'lib/page.js',
+  'lib/runtime.js',
+  'content.js',
+];
+const CONTENT_SCRIPT_CSS_FILES = ['content.css'];
 const observedDownloads = [];
 let activeBatchFolderName = null;
 let activeBatchMode = 'legacy';
@@ -124,6 +131,33 @@ async function setActionForTab(tabId, url) {
   await chrome.action.setBadgeBackgroundColor({ tabId, color: active ? '#2563eb' : '#6b7280' }).catch(() => {});
 }
 
+function isTranscriptPageUrl(url) {
+  return typeof url === 'string' && ACTIVE_HOST_RE.test(url);
+}
+
+async function pingContentScript(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:ping' });
+    return !!response?.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureExtensionUi(tabId, url) {
+  if (!isTranscriptPageUrl(url)) return false;
+  if (await pingContentScript(tabId)) return true;
+  await chrome.scripting.insertCSS({
+    target: { tabId },
+    files: CONTENT_SCRIPT_CSS_FILES,
+  }).catch(() => {});
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: CONTENT_SCRIPT_FILES,
+  });
+  return await pingContentScript(tabId);
+}
+
 async function refreshAllTabs() {
   const tabs = await chrome.tabs.query({}).catch(() => []);
   await Promise.all((tabs || []).filter(t => typeof t.id === 'number').map(t => setActionForTab(t.id, t.url)));
@@ -147,12 +181,16 @@ chrome.runtime.onStartup?.addListener(async () => {
 
 chrome.action.onClicked.addListener(async tab => {
   if (tab?.id == null) return;
+  await ensureExtensionUi(tab.id, tab.url).catch(() => {});
   await chrome.tabs.sendMessage(tab.id, { type: 'zoomTranscriptExtension:openPanel' }).catch(() => {});
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url || changeInfo.status === 'complete') {
     setActionForTab(tabId, changeInfo.url || tab.url).catch(() => {});
+    if ((changeInfo.status === 'complete' || changeInfo.url) && isTranscriptPageUrl(changeInfo.url || tab.url)) {
+      ensureExtensionUi(tabId, changeInfo.url || tab.url).catch(() => {});
+    }
   }
 });
 
