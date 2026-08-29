@@ -49,10 +49,18 @@
 - **Session context:** User specified in this session
 - **Status:** Active
 - **Context:** Starting from page 3 and downloading from there would create partial/inaccurate runs.
-- **Decision:** `Save all available` must attempt to return to page 1 before downloading.
+- **Decision:** `Save all` must attempt to return to page 1 before downloading.
 - **Consequences:**
   - deterministic runs
   - if reset fails, run must abort
+
+## 9. Keep a separate current-page action alongside the batch action
+- **Session context:** UX polish pass
+- **Status:** Active
+- **Decision:** Expose both `Save all` for the full cross-page batch and `Save page` for the current page only.
+- **Consequences:**
+  - user intent is clearer
+  - docs must explain the difference between the two actions
 
 ## 7. Abort instead of proceeding if page-1 reset fails
 - **Session context:** User specified in this session

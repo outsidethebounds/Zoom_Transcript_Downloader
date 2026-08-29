@@ -30,7 +30,7 @@ node tests/logic.test.mjs
 - Verify filename pattern changes update the example
 - Verify include-meeting-ID toggle persists
 
-### 3. Save all available
+### 3. Save all
 Must verify all of these:
 - run starts by trying to return to page 1
 - if page-1 reset fails, run aborts clearly
@@ -41,6 +41,7 @@ Must verify all of these:
 - running-job notification appears when bulk download starts
 - stop button works
 - run planning happens before file saves begin
+- `Save page` only saves transcripts from the current page
 
 ### 4. Direct-save behavior
 For each transcript during save-all:

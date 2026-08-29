@@ -56,6 +56,7 @@ Primary runtime.
 
 Responsibilities:
 - render the page panel and settings modal
+- keep the product title and footer utility controls in sync with panel state
 - install the page hook
 - plan a run across all pages
 - execute the save pass page by page
@@ -74,7 +75,7 @@ Styles injected panel and modals.
 ### Direct-save flow
 1. user opens Zoom transcript page
 2. content script boots panel
-3. user clicks `Save all available`
+3. user clicks `Save all`
 4. extension:
    - resets to page 1
    - scans every page to plan final filenames

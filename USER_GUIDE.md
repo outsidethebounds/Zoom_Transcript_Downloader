@@ -10,7 +10,7 @@ Its main workflow is intentionally simple:
 
 1. Open the Zoom **Transcripts** page.
 2. Confirm the Zoom Transcript Downloader panel appears.
-3. Click **Save all available**.
+3. Click **Save all**.
 4. Keep the Zoom tab open until the run finishes.
 
 The extension then works through the available transcript pages, downloads the transcript text that Zoom allows, and saves the files with organized filenames.
@@ -84,7 +84,7 @@ That is only an example. Your Zoom hostname or navigation path may look differen
 
 ![Example Zoom Transcripts page](./guide/zoom-transcript-page-anonymized.png)
 
-When you open a supported Zoom **Transcripts** page, the Zoom Transcript Downloader panel should appear automatically in the upper-right area of the page.
+When you open a supported Zoom **Transcripts** page, the Zoom Transcript Downloader panel should appear automatically on the page.
 
 If you closed the panel earlier, use the browser extension icon from the **Extensions** menu to open it again.
 
@@ -95,9 +95,11 @@ If you closed the panel earlier, use the browser extension icon from the **Exten
 1. Open the Zoom **Transcripts** page.
 2. Confirm the Zoom Transcript Downloader panel is visible.
 3. Review the status count if you want.
-4. Click **Save all available**.
+4. Click **Save all**.
 5. Keep that Zoom tab open while the run is in progress.
 6. Wait for the completion message.
+
+If you only want the transcripts that are currently visible on the page, click **Save page** instead.
 
 ## What Happens During A Download
 
@@ -222,9 +224,9 @@ Skipped transcripts do not automatically mean the extension failed.
 Try these steps:
 
 1. Confirm you are on a supported Zoom **Transcripts** page.
-2. Refresh the Zoom page.
+2. Wait a moment for the Zoom page to finish rendering after navigation.
 3. Confirm the extension is installed and enabled.
-4. Open the browser **Extensions** menu and select the extension icon to reopen the panel.
+4. Open the browser **Extensions** menu and select the extension icon to reopen the panel if you closed it.
 5. If you manually installed or updated the extension, open the browser Extensions page and select **Reload**, then refresh the Zoom tab.
 
 ### No Transcripts Are Found
@@ -248,7 +250,7 @@ Recommended recovery:
 
 1. Refresh the Zoom page.
 2. Wait for the transcript list to finish loading.
-3. Start **Save all available** again.
+3. Start **Save all** again.
 
 ### Files Are Not Where Expected
 
@@ -312,7 +314,7 @@ If you use **Load unpacked**:
 
 ## Getting Help / Reporting A Problem
 
-Use **Help & About** from the `?` button in the panel header for project information and the GitHub repository link.
+Use **Help & About** from the `?` button in the panel footer for project information and the GitHub repository link.
 
 When reporting a problem, include:
 

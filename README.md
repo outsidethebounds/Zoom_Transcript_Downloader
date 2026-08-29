@@ -11,7 +11,7 @@ Zoom Transcript Downloader is a Chrome and Microsoft Edge extension for saving t
 
 The intended flow is simple:
 
-> Open your Zoom **Transcripts** page, confirm the panel appears, then click **Save all available**.
+> Open your Zoom **Transcripts** page, confirm the panel appears, then click **Save all**.
 
 ## Installation
 
@@ -39,8 +39,8 @@ See the full guide for step-by-step instructions and screenshots.
 
 1. Install the extension.
 2. Sign in to your Zoom web portal and open the **Transcripts** page for your recordings.
-3. Confirm the Zoom Transcript Downloader panel appears in the upper-right area of the page.
-4. Click **Save all available**.
+3. Confirm the Zoom Transcript Downloader panel appears on the page.
+4. Click **Save all**.
 5. Keep the Zoom tab open until the extension finishes.
 6. Look in your browser's **Downloads** location and configured transcript subfolder.
 

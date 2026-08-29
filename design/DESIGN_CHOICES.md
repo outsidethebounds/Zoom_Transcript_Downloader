@@ -1,6 +1,6 @@
 # Design Choices
 
-Last updated: 2026-08-18
+Last updated: 2026-08-29
 
 ## Release identity
 
@@ -108,7 +108,7 @@ Why:
 
 ## Help & About modal
 
-The `?` button now opens an in-page Help & About modal.
+The Help button in the panel footer now opens an in-page Help & About modal.
 
 It contains:
 - creator attribution
@@ -118,6 +118,22 @@ It contains:
 Why:
 - it keeps the user in context
 - it is more useful than redirecting immediately to docs
+
+## Panel action hierarchy
+
+The main panel now separates primary work actions from utility controls.
+
+Current layout:
+- product title at the top
+- status card directly below the title
+- `Save all`, `Save page`, and `Stop` as the main action row
+- save location and activity beneath the actions
+- centered footer utility controls for Settings, Help, expand/collapse, and close
+
+Why:
+- keeps the bulk-download workflow obvious
+- prevents utility actions from visually competing with the primary task
+- makes the title read more like a product name than a toolbar label
 
 ## Code organization
 

@@ -26,7 +26,7 @@ This document defines what must be true before treating this private repo as a s
 The accepted user workflow is:
 1. install the extension from the Chrome Web Store link or by manual unpacked install
 2. open Zoom transcript page
-3. click **Save all available**
+3. click **Save all**
 4. wait for downloads to finish
 5. confirm the transcript files were saved with the expected names in the chosen Downloads subfolder
 
@@ -39,7 +39,7 @@ The extension must:
 - open correctly on the Zoom transcript page
 - detect downloadable rows accurately
 - exclude rows whose download button is disabled/unavailable
-- reset to page 1 before `Save all available`
+- reset to page 1 before `Save all`
 - abort clearly if page-1 reset fails
 - traverse all available transcript pages
 - not loop indefinitely across pages
@@ -61,7 +61,7 @@ The extension must:
 - default to collapsed panel state
 - keep debug mode hidden behind a toggle
 - provide a visible running-job notification during bulk download
-- provide a Help & About affordance from the panel header
+- provide Settings, Help & About, expand/collapse, and close affordances from the panel footer
 - clearly communicate the chosen save location and filename pattern
 
 ### D. Documentation quality

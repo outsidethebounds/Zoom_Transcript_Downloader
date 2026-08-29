@@ -233,15 +233,33 @@ function ensureLauncher() {
   launcher.style.display = document.getElementById(PANEL_ID) ? 'none' : 'block';
 }
 
-function setStatus(rows) {
-  const rowsEl = document.getElementById('ztd-status-rows');
-  const total = transcriptCountText();
+function getPanelStats(rows) {
+  const totalText = transcriptCountText();
+  const total = Number(totalText) || 0;
   const downloadable = rows.length;
   const visibleParsed = scanRows();
   const unavailable = Math.max(0, visibleParsed.length - downloadable);
-  const base = total ? `${downloadable}/${total} downloadable` : `${downloadable} downloadable`;
-  const suffix = unavailable ? ` (${unavailable} unavailable on this page)` : '';
-  if (rowsEl) rowsEl.textContent = `${base}${suffix}`;
+  const percent = total ? Math.max(0, Math.min(100, Math.round((downloadable / total) * 100))) : 0;
+  return {
+    total,
+    totalText,
+    downloadable,
+    unavailable,
+    percent,
+  };
+}
+
+function setStatus(rows) {
+  const stats = getPanelStats(rows);
+  const statusMain = document.getElementById('ztd-status-main');
+  const statusSecondary = document.getElementById('ztd-status-secondary');
+
+  if (statusMain) statusMain.textContent = stats.total ? `${stats.downloadable} of ${stats.total} ready` : `${stats.downloadable} ready`;
+  if (statusSecondary) {
+    statusSecondary.textContent = stats.unavailable
+      ? `${stats.unavailable} unavailable on this page`
+      : 'All visible transcripts on this page are ready to save';
+  }
 }
 
 function applyDebugVisibility() {
@@ -252,8 +270,10 @@ function applyDebugVisibility() {
 
 function setSaveAllRunning(isRunning) {
   const saveAll = document.getElementById('ztd-save-all');
+  const savePage = document.getElementById('ztd-save-page');
   const stop = document.getElementById('ztd-stop-save-all');
   if (saveAll) saveAll.disabled = isRunning;
+  if (savePage) savePage.disabled = isRunning;
   if (stop) {
     stop.disabled = !isRunning;
     stop.classList.toggle('ztd-active', isRunning);
@@ -263,18 +283,30 @@ function setSaveAllRunning(isRunning) {
 function updatePanelSummary() {
   const out = document.getElementById('ztd-output');
   const destination = document.getElementById('ztd-destination');
+  const activity = document.getElementById('ztd-activity-note');
   if (destination && currentSettings) {
     destination.textContent = currentDestinationPreview();
   }
   if (!out || !currentSettings) return;
   if (stickyPanelMessage) {
-    out.textContent = typeof stickyPanelMessage === 'string' ? stickyPanelMessage : JSON.stringify(stickyPanelMessage, null, 2);
+    const message = typeof stickyPanelMessage === 'string'
+      ? stickyPanelMessage
+      : [stickyPanelMessage.message, stickyPanelMessage.detail].filter(Boolean).join('\n');
+    if (activity) activity.textContent = message;
+    out.textContent = message;
     return;
   }
   const pagination = getPaginationState();
   const visibleParsed = scanRows();
   const unavailableVisible = Math.max(0, visibleParsed.length - lastRows.length);
-  out.textContent = JSON.stringify({
+  const summaryLines = [
+    `Viewing page ${pagination.currentPage} of ${pagination.totalPages}.`,
+    `${lastRows.length} downloadable row${lastRows.length === 1 ? '' : 's'} detected on this page.`,
+    unavailableVisible ? `${unavailableVisible} row${unavailableVisible === 1 ? '' : 's'} currently unavailable.` : 'No unavailable rows detected on this page.',
+    `Saved ${downloadManifest.length} transcript${downloadManifest.length === 1 ? '' : 's'} in this session.`,
+    `Meeting ID in filenames: ${currentSettings.includeMeetingId ? 'On' : 'Off'}.`,
+  ];
+  const detail = {
     url: location.href,
     visibleRows: lastRows.length,
     visibleUnavailableRows: unavailableVisible,
@@ -285,7 +317,9 @@ function updatePanelSummary() {
     savedEntriesTracked: downloadManifest.length,
     perItemDelayMs: SAVE_ALL_DELAY_MS,
     note: 'V2 plans filenames across all pages first, then captures transcript text and saves each file directly with its final name.'
-  }, null, 2);
+  };
+  if (activity) activity.textContent = summaryLines.join(' ');
+  out.textContent = `${summaryLines.join('\n')}\n\n${JSON.stringify(detail, null, 2)}`;
 }
 
 function scheduleRescan() {
@@ -372,28 +406,88 @@ function ensureSettingsModal() {
     modal.hidden = true;
     modal.innerHTML = `
       <div id="ztd-settings-card">
-        <div class="ztd-settings-actions">
-          <strong>Settings</strong>
+        <div class="ztd-settings-header">
+          <div class="ztd-settings-hero">
+            <div class="ztd-settings-eyebrow">Preferences</div>
+            <strong>Save settings</strong>
+            <p class="ztd-settings-subtitle">Choose how transcript files are named and where they land inside your Downloads folder.</p>
+          </div>
           <button type="button" class="ztd-secondary" id="ztd-settings-close">Close</button>
         </div>
-        <label>Filename pattern <button type="button" class="ztd-secondary" id="ztd-pattern-help">?</button>
-          <input type="text" id="ztd-settings-pattern" />
-        </label>
-        <div><strong>Example output:</strong> <span id="ztd-pattern-example"></span></div>
-        <label>Save folder inside Downloads
-          <input type="text" id="ztd-settings-subfolder" placeholder="Optional, for example Work/Zoom" />
-        </label>
-        <div class="ztd-settings-note">Files save inside your browser's normal Downloads location. For security reasons, browser extensions cannot choose any folder on your computer.</div>
-        <div><strong>Files will save to:</strong> <span id="ztd-settings-folder-example"></span></div>
-        <label><input type="checkbox" id="ztd-settings-include-meeting-id" /> Include meeting ID in every filename</label>
-        <div class="ztd-settings-actions">
+        <div class="ztd-settings-layout">
+          <section class="ztd-settings-section">
+            <div class="ztd-settings-section-head">
+              <div>
+                <div class="ztd-settings-section-title">Filename pattern</div>
+                <div class="ztd-settings-note">Use tokens to keep transcript filenames readable and consistent.</div>
+              </div>
+              <button type="button" class="ztd-secondary ztd-help-chip" id="ztd-pattern-help">Pattern help</button>
+            </div>
+            <label class="ztd-field">
+              <span class="ztd-field-label">Pattern</span>
+              <input type="text" id="ztd-settings-pattern" />
+            </label>
+            <div class="ztd-preset-row" aria-label="Suggested filename patterns">
+              <button type="button" class="ztd-secondary ztd-preset-chip" data-pattern="{date} - {time} - {title}">Meeting default</button>
+              <button type="button" class="ztd-secondary ztd-preset-chip" data-pattern="{date} - {title}">Compact</button>
+              <button type="button" class="ztd-secondary ztd-preset-chip" data-pattern="{date} - {time} - {title} - {meetingId}">With ID</button>
+            </div>
+            <div class="ztd-preview-card">
+              <div class="ztd-preview-label">Example filename</div>
+              <code id="ztd-pattern-example"></code>
+            </div>
+          </section>
+          <section class="ztd-settings-section">
+            <div class="ztd-settings-section-head">
+              <div>
+                <div class="ztd-settings-section-title">Save destination</div>
+                <div class="ztd-settings-note">The extension saves inside your browser's normal Downloads location, then adds an optional subfolder.</div>
+              </div>
+            </div>
+            <div class="ztd-destination-root">
+              <span class="ztd-root-pill">Browser root</span>
+              <strong>Downloads</strong>
+            </div>
+            <label class="ztd-field">
+              <span class="ztd-field-label">Folder inside Downloads</span>
+              <input type="text" id="ztd-settings-subfolder" placeholder="Optional, for example Work/Zoom" />
+            </label>
+            <div class="ztd-settings-callout">
+              Browser extensions cannot save outside the browser's configured Downloads folder. This field only adds a subfolder underneath it.
+            </div>
+            <div class="ztd-preview-card">
+              <div class="ztd-preview-label">Files will save to</div>
+              <code id="ztd-settings-folder-example"></code>
+            </div>
+          </section>
+          <section class="ztd-settings-section">
+            <div class="ztd-settings-section-head">
+              <div>
+                <div class="ztd-settings-section-title">Filename safety</div>
+                <div class="ztd-settings-note">Add extra uniqueness when meeting titles repeat.</div>
+              </div>
+            </div>
+            <div class="ztd-toggle-card">
+              <label class="ztd-checkbox-row">
+                <input type="checkbox" id="ztd-settings-include-meeting-id" />
+                <span>
+                  <strong>Include meeting ID in every filename</strong>
+                  <span class="ztd-settings-note">Useful when similar meeting titles might otherwise collide.</span>
+                </span>
+              </label>
+            </div>
+          </section>
+        </div>
+        <div class="ztd-settings-footer">
+          <button type="button" class="ztd-secondary" id="ztd-settings-cancel">Cancel</button>
+          <div id="ztd-settings-save-status" class="ztd-settings-note" hidden></div>
           <button type="button" id="ztd-settings-save">Save settings</button>
         </div>
-        <div id="ztd-settings-save-status" class="ztd-settings-note" hidden></div>
       </div>
     `;
     document.body.appendChild(modal);
     modal.querySelector('#ztd-settings-close').addEventListener('click', () => { modal.hidden = true; });
+    modal.querySelector('#ztd-settings-cancel').addEventListener('click', () => { modal.hidden = true; });
     modal.addEventListener('click', event => { if (event.target === modal) modal.hidden = true; });
     modal.querySelector('#ztd-pattern-help').addEventListener('click', () => {
       const help = ensurePatternHelpModal();
@@ -411,6 +505,12 @@ function ensureSettingsModal() {
       `;
       help.hidden = false;
     });
+    modal.querySelectorAll('.ztd-preset-chip').forEach(button => {
+      button.addEventListener('click', () => {
+        modal.querySelector('#ztd-settings-pattern').value = button.dataset.pattern || '';
+        renderSettingsPreview(modal);
+      });
+    });
     modal.querySelector('#ztd-settings-pattern').addEventListener('input', () => renderSettingsPreview(modal));
     modal.querySelector('#ztd-settings-subfolder').addEventListener('input', () => renderSettingsPreview(modal));
     modal.querySelector('#ztd-settings-include-meeting-id').addEventListener('change', () => renderSettingsPreview(modal));
@@ -424,7 +524,7 @@ function ensureSettingsModal() {
       currentSettings = { ...(currentSettings || {}), ...settings };
       const status = modal.querySelector('#ztd-settings-save-status');
       status.hidden = false;
-      status.textContent = `Saved. Files will use this name pattern and save to Downloads/${buildDownloadFolderPath(settings.downloadSubfolder)}.`;
+      status.textContent = `Saved. Future transcript files will use this pattern and save to Downloads/${buildDownloadFolderPath(settings.downloadSubfolder)}.`;
       updatePanelSummary();
       log('Settings updated', settings);
     });
@@ -564,6 +664,57 @@ async function saveTranscriptRow(item, plannedEntry) {
   return { ok: true, savedFilename: entry.savedFilename, targetFilename: plannedEntry.targetFilename };
 }
 
+async function saveVisiblePage(settingsNow) {
+  const pagination = getPaginationState();
+  const allRowsNow = scanRows();
+  const rowsNow = allRowsNow.filter(r => r.hasDownload);
+  const unavailableNow = Math.max(0, allRowsNow.length - rowsNow.length);
+
+  if (!allRowsNow.length) {
+    debugCheckpoint('Current-page save found no transcript rows', {
+      error: 'No transcript rows were found on the current page.',
+      page: pagination.currentPage,
+    });
+    return { ok: false, error: 'No transcript rows were found on the current page.' };
+  }
+
+  const plannedEntries = applyCollisionSafeFilenames(
+    rowsNow.map(row => buildPlannedEntry(row, settingsNow, pagination.currentPage)),
+    settingsNow
+  );
+
+  const results = [];
+  for (let i = 0; i < rowsNow.length; i++) {
+    if (saveAllController.stopRequested) {
+      return {
+        ok: false,
+        stopped: true,
+        page: pagination.currentPage,
+        plannedEntries,
+        skippedUnavailable: unavailableNow,
+        results,
+      };
+    }
+    debugCheckpoint('Saving current-page transcript row', {
+      page: pagination.currentPage,
+      rowIndex: i,
+      rowKey: rowsNow[i].key,
+      title: rowsNow[i].meta?.title || '',
+      targetFilename: plannedEntries[i]?.targetFilename || null,
+    });
+    results.push(await saveTranscriptRow(rowsNow[i], plannedEntries[i]));
+    await sleep(SAVE_ALL_DELAY_MS);
+  }
+
+  return {
+    ok: true,
+    page: pagination.currentPage,
+    plannedEntries,
+    skippedUnavailable: unavailableNow,
+    results,
+  };
+}
+
 async function gotoFirstPage() {
   return await navigateToFirstPage({
     getPaginationState,
@@ -595,21 +746,48 @@ function renderPanel(rows, settings) {
     panel.innerHTML = `
       <div class="ztd-header">
         <div class="ztd-header-left">
-          <strong>Zoom Transcript Downloader</strong>
-          <span id="ztd-status-rows" class="ztd-pill">0 transcripts</span>
+          <div class="ztd-title-block">
+            <strong><span class="ztd-title-zoom">Zoom</span> Transcript Downloader</strong>
+          </div>
         </div>
-        <div class="ztd-header-right">
-          <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-settings" title="Settings">⚙</button>
-          <button type="button" class="ztd-secondary ztd-gear-icon" id="ztd-readme-help" title="Help & About">?</button>
-          <button type="button" class="ztd-secondary" id="ztd-collapse">Expand</button>
-          <button type="button" class="ztd-secondary" id="ztd-close">Close</button>
+      </div>
+      <div class="ztd-status-card">
+        <div class="ztd-status-icon" aria-hidden="true">✓</div>
+        <div class="ztd-status-copy">
+          <div id="ztd-status-main" class="ztd-status-main">0 ready</div>
+          <div id="ztd-status-secondary" class="ztd-status-secondary">Waiting for transcript rows</div>
         </div>
       </div>
       <div class="ztd-controls">
-        <button type="button" id="ztd-save-all">Save all available</button>
-        <button type="button" class="ztd-secondary" id="ztd-stop-save-all">Stop</button>
+        <div class="ztd-button-with-help">
+          <button
+            type="button"
+            id="ztd-save-all"
+            aria-describedby="ztd-save-all-tooltip"
+          >Save all</button>
+          <span class="ztd-inline-tooltip" id="ztd-save-all-tooltip" role="tooltip">
+            Saves every available transcript across all pages, not just the page you are viewing now.
+          </span>
+        </div>
+        <button type="button" class="ztd-secondary-action" id="ztd-save-page" title="Save only the transcripts available on the current page">Save page</button>
+        <button type="button" class="ztd-danger" id="ztd-stop-save-all">Stop</button>
       </div>
-      <div class="ztd-destination-row"><strong>Saving to:</strong> <span id="ztd-destination"></span></div>
+      <div class="ztd-meta-section">
+        <div class="ztd-section-label">Save location</div>
+        <div class="ztd-destination-card">
+          <span id="ztd-destination"></span>
+        </div>
+      </div>
+      <div class="ztd-activity-card">
+        <div class="ztd-section-label">Activity</div>
+        <div id="ztd-activity-note" class="ztd-activity-note"></div>
+      </div>
+      <div class="ztd-footer-actions">
+        <button type="button" class="ztd-icon-button ztd-icon-settings" id="ztd-settings" title="Settings" aria-label="Open settings"><span class="ztd-icon-glyph" aria-hidden="true">⚙</span></button>
+        <button type="button" class="ztd-icon-button ztd-icon-help" id="ztd-readme-help" title="Help and About" aria-label="Open help and about">ⓘ</button>
+        <button type="button" class="ztd-icon-button ztd-icon-expand" id="ztd-collapse" title="Expand panel" aria-label="Expand panel">⇱</button>
+        <button type="button" class="ztd-icon-button ztd-icon-close" id="ztd-close" title="Close panel" aria-label="Close panel">✕</button>
+      </div>
       <pre id="ztd-output"></pre>
       <div class="ztd-spacer" style="height:10px"></div>
       <div class="ztd-debug-row">
@@ -628,7 +806,10 @@ function renderPanel(rows, settings) {
     });
     panel.querySelector('#ztd-collapse').addEventListener('click', event => {
       panel.classList.toggle('ztd-collapsed');
-      event.currentTarget.textContent = panel.classList.contains('ztd-collapsed') ? 'Expand' : 'Collapse';
+      const collapsed = panel.classList.contains('ztd-collapsed');
+      event.currentTarget.textContent = collapsed ? '⇱' : '⇲';
+      event.currentTarget.title = collapsed ? 'Expand panel' : 'Collapse panel';
+      event.currentTarget.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
     });
     panel.querySelector('#ztd-debug-toggle').addEventListener('change', applyDebugVisibility);
 
@@ -775,20 +956,65 @@ function renderPanel(rows, settings) {
       }
 
       stickyPanelMessage = null;
-      panel.querySelector('#ztd-output').textContent = JSON.stringify({
+      const completionSummary = {
         pagesVisited,
         planned: plannedEntries.length,
         downloaded: downloadManifest.length,
         skippedUnavailable,
         results,
-      }, null, 2);
+      };
+      panel.querySelector('#ztd-activity-note').textContent = `Finished processing ${plannedEntries.length} planned transcript${plannedEntries.length === 1 ? '' : 's'} across ${pagesVisited} page${pagesVisited === 1 ? '' : 's'}. Saved ${downloadManifest.length}.`;
+      panel.querySelector('#ztd-output').textContent = JSON.stringify(completionSummary, null, 2);
       showToast(`Download job finished. Saved ${downloadManifest.length} transcript${downloadManifest.length === 1 ? '' : 's'} with final filenames.`, 'success', 5000);
+    });
+
+    panel.querySelector('#ztd-save-page').addEventListener('click', async () => {
+      const settingsNow = await getSettings();
+      const pagination = getPaginationState();
+      currentDownloadFolderName = buildDownloadFolderPath(settingsNow.downloadSubfolder);
+      stickyPanelMessage = {
+        ok: true,
+        message: `Saving transcripts from page ${pagination.currentPage}.`,
+        detail: 'Only the transcripts visible on this page will be captured and saved.',
+        folderName: currentDownloadFolderName
+      };
+      currentRunId = `run-${Date.now()}`;
+      await startDownloadBatch({ runId: currentRunId, folderName: currentDownloadFolderName, mode: 'direct-save-current-page' });
+      downloadManifest = [];
+      updatePanelSummary();
+      saveAllController = { running: true, stopRequested: false };
+      setSaveAllRunning(true);
+      showToast(`Current-page save started. Files will be saved in Downloads/${currentDownloadFolderName}.`, 'info', 5000);
+
+      try {
+        const result = await saveVisiblePage(settingsNow);
+        if (!result.ok) {
+          debugCheckpoint('Current-page save failed', result);
+          return;
+        }
+        stickyPanelMessage = null;
+        panel.querySelector('#ztd-activity-note').textContent = `Finished saving page ${result.page}. Saved ${downloadManifest.length} transcript${downloadManifest.length === 1 ? '' : 's'} from the current page.`;
+        panel.querySelector('#ztd-output').textContent = JSON.stringify({
+          page: result.page,
+          planned: result.plannedEntries.length,
+          downloaded: downloadManifest.length,
+          skippedUnavailable: result.skippedUnavailable,
+          results: result.results,
+        }, null, 2);
+        showToast(`Current page finished. Saved ${downloadManifest.length} transcript${downloadManifest.length === 1 ? '' : 's'}.`, 'success', 5000);
+      } finally {
+        flushPendingTranscriptWaiters(new Error('Current-page save finished before transcript capture completed.'));
+        await finishDownloadBatch({ runId: currentRunId }).catch(() => {});
+        saveAllController.running = false;
+        setSaveAllRunning(false);
+      }
     });
 
     panel.querySelector('#ztd-stop-save-all').addEventListener('click', () => {
       if (saveAllController.running) {
         saveAllController.stopRequested = true;
         stickyPanelMessage = 'Stop requested. Will halt after the current transcript finishes saving.';
+        panel.querySelector('#ztd-activity-note').textContent = stickyPanelMessage;
         panel.querySelector('#ztd-output').textContent = stickyPanelMessage;
         showToast('Stop requested. The job will halt after the current item.', 'warn', 4000);
       }
