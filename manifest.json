@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Zoom Transcript Downloader",
-  "version": "2026.8",
-  "version_name": "2026.08",
+  "version": "2026.9",
+  "version_name": "2026.09",
   "description": "Downloads Zoom transcripts and saves them directly with final filenames.",
   "permissions": [
     "downloads",

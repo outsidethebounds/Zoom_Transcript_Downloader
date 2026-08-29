@@ -70,6 +70,7 @@ The repo must contain:
 - maintainer handoff docs reflecting current architecture
 - testing guidance that matches actual verification expectations
 - release criteria that reflect the current intended product shape
+- a versioning note that requires incrementing `manifest.json` before packaging or upload
 
 ## Manual validation checklist
 

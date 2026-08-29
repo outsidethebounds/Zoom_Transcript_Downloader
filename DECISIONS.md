@@ -12,7 +12,7 @@
   - background download handling is now part of the critical path
 
 ## 2. Save transcript content directly with final filenames
-- **Session context:** Release `2026.08`
+- **Session context:** Release `2026.09`
 - **Status:** Active
 - **Context:** Rename-script workflows left stale artifacts, extra user steps, and confusing filename behavior.
 - **Decision:** Capture transcript content from the Zoom page and save extension-owned files directly with the final filename.
@@ -125,3 +125,11 @@
 - **Consequences:**
   - users get immediate feedback that the job is active
   - slightly more UI state to maintain
+
+## 16. Increment manifest version before packaging or release commits
+- **Session context:** Release packaging fix on 2026-08-29
+- **Status:** Active
+- **Decision:** Bump `manifest.json` `version` before any commit intended for packaging, upload, or release distribution.
+- **Consequences:**
+  - avoids Chrome Web Store / Edge rejection for unchanged version numbers
+  - requires docs and generated guides to stay aligned with the bumped release label

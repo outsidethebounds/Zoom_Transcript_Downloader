@@ -4,13 +4,18 @@ Last updated: 2026-08-29
 
 ## Release identity
 
-- Human-facing release label: `2026.08`
-- Manifest `version`: `2026.8`
-- Manifest `version_name`: `2026.08`
+- Human-facing release label: `2026.09`
+- Manifest `version`: `2026.9`
+- Manifest `version_name`: `2026.09`
 
 Why:
 - Chrome and Edge extension updates compare numeric dot-separated version segments.
 - We keep the machine version compatible with that rule while preserving the desired release label in the UI and docs.
+
+Release policy:
+- increment `manifest.json` `version` before any commit intended for packaging or store upload
+- keep `version_name` and human-facing guide labels aligned to that release
+- never upload a package whose manifest version is unchanged from the published package
 
 ## Primary product goal
 

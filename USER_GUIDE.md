@@ -1,6 +1,6 @@
 # Zoom Transcript Downloader User Guide
 
-Version: 2026.08
+Version: 2026.09
 
 ## What Zoom Transcript Downloader Does
 
@@ -328,5 +328,5 @@ When reporting a problem, include:
 
 This guide matches:
 
-- **Zoom Transcript Downloader** version `2026.08`
+- **Zoom Transcript Downloader** version `2026.09`
 - Supported browsers: **Google Chrome** and **Microsoft Edge**
