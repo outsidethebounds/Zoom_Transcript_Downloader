@@ -1,3 +1,5 @@
+import { createDownloadSuppression } from './lib/download-suppression.mjs';
+
 const BASE_DEFAULTS = {
   filenamePattern: '{date} - {time} - {title}',
   downloadSubfolder: '',
@@ -16,8 +18,8 @@ const CONTENT_SCRIPT_CSS_FILES = ['content.css'];
 const observedDownloads = [];
 let activeBatchFolderName = null;
 let activeBatchMode = 'legacy';
-const suppressedDownloadIds = new Set();
 const pendingExtensionOwnedFilenames = [];
+const downloadSuppression = createDownloadSuppression(chrome, item => shouldSuppressNativeZoomDownload(item));
 
 async function inferDefaultOs() {
   try {
@@ -55,7 +57,7 @@ function isExtensionOwnedDownload(item) {
 }
 
 function shouldSuppressNativeZoomDownload(item) {
-  if (activeBatchMode !== 'direct-save') return false;
+  if (!['direct-save', 'direct-save-current-page'].includes(activeBatchMode)) return false;
   if (isExtensionOwnedDownload(item)) return false;
   const haystack = [
     item?.url || '',
@@ -81,27 +83,19 @@ function recordDownload(item) {
 
 chrome.downloads.onCreated.addListener(item => {
   recordDownload(item);
-  if (shouldSuppressNativeZoomDownload(item)) {
-    suppressedDownloadIds.add(item.id);
-    chrome.downloads.cancel(item.id).catch(() => {});
-  }
+  downloadSuppression.onCreated(item);
 });
 
 chrome.downloads.onChanged.addListener(delta => {
   const found = observedDownloads.find(d => d.id === delta.id);
-  if (!found) return;
-  if (delta.filename?.current) {
-    found.filename = delta.filename.current;
-    found.basename = basename(delta.filename.current);
+  if (found) {
+    if (delta.filename?.current) {
+      found.filename = delta.filename.current;
+      found.basename = basename(delta.filename.current);
+    }
+    if (delta.state?.current) found.state = delta.state.current;
   }
-  if (delta.state?.current) {
-    found.state = delta.state.current;
-  }
-  if (suppressedDownloadIds.has(delta.id) && (delta.state?.current === 'complete' || delta.state?.current === 'interrupted')) {
-    chrome.downloads.removeFile(delta.id).catch(() => {});
-    chrome.downloads.erase({ id: delta.id }).catch(() => {});
-    suppressedDownloadIds.delete(delta.id);
-  }
+  downloadSuppression.onChanged(delta);
 });
 
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
@@ -221,7 +215,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'zoomTranscriptExtension:finishDownloadBatch') {
     activeBatchFolderName = null;
     activeBatchMode = 'legacy';
-    suppressedDownloadIds.clear();
     pendingExtensionOwnedFilenames.length = 0;
     sendResponse({ ok: true });
     return false;

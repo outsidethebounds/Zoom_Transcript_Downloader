@@ -6,7 +6,8 @@ There is still no full automated browser test suite. Current validation is synta
 
 ### Syntax validation
 ```bash
-node --check background.js
+node --check --input-type=module < background.js
+node --check lib/download-suppression.mjs
 node --check content.js
 node --check page-hook.js
 ```
@@ -14,6 +15,7 @@ node --check page-hook.js
 ### Lightweight automated logic test
 ```bash
 node tests/logic.test.mjs
+node tests/download-suppression.test.mjs
 ```
 
 ## Required manual verification after changes
@@ -57,7 +59,7 @@ Verify:
 - filenames are stable across a full run
 
 ## Current coverage shape
-- Automated tests: lightweight pure-logic coverage in `tests/logic.test.mjs`
+- Automated tests: pure-logic coverage in `tests/logic.test.mjs` and mocked Chrome download lifecycle coverage in `tests/download-suppression.test.mjs`
 - Syntax checks: yes
 - Manual testing: still required for end-to-end browser behavior
 
@@ -73,6 +75,7 @@ No automated tests for:
 - page-number detection may be absent or unreliable
 - Zoom may change how transcript downloads are requested
 - native-download cancellation may behave differently across browsers/platforms
+- the mocked download lifecycle tests cover both direct-save modes, delayed terminal events after finish, duplicate terminal events, extension-owned and out-of-run downloads, interrupted downloads, already-terminal creation, and bounded suppression tracking
 
 ## Recommended future tests
 If test coverage is added, prioritize:
