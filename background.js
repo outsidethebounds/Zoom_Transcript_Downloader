@@ -105,7 +105,7 @@ function recordDownload(item) {
     id: item.id,
     filename: item.filename || '',
     basename: basename(item.filename || item.finalUrl || item.url || ''),
-    url: item.finalUrl || item.url || '',
+    url: /^https:\/\/file-paa\.zoom\.us\//i.test(item.finalUrl || item.url || '') ? '' : item.finalUrl || item.url || '',
     createdAt: Date.now(),
     state: item.state || 'in_progress',
   });
@@ -143,14 +143,64 @@ chrome.downloads.onChanged.addListener(delta => {
   downloadSuppression.onChanged(delta);
 });
 
+const directNoteExports = new Map();
+const directNoteFilenames = new Map();
+async function saveMyNotesDirect(payload, sender) {
+  const tabId = sender?.tab?.id;
+  const run = sourceRunByWorkerTab.get(tabId);
+  if (!run || run.currentSource !== 'myNotes' || run.stopRequested) return { ok: false, cancelled: true };
+  const key = tabId + ':' + payload.exportId;
+  if (directNoteExports.has(key)) return await directNoteExports.get(key);
+  const operation = (async () => {
+    let url;
+    try { url = new URL(payload.url); } catch { return { ok: false }; }
+    if (url.protocol !== 'https:' || url.hostname !== 'file-paa.zoom.us' || !Number.isFinite(payload.expiresAt)) return { ok: false };
+    if (payload.expiresAt <= Date.now() + 1000) return { ok: false, expired: true };
+    const filename = String(payload.filename || '').replace(/[\/]/g, ' ').trim();
+    // The coordinator, not the page, owns the source-folder path.
+    const folder = sourceFolderPath(run.rootFolder, 'myNotes');
+    if (!filename || payload.folderPath !== folder) return { ok: false };
+    if (run.stopRequested) return { ok: false, cancelled: true };
+    let id;
+    const sourceUrl = url.href;
+    directNoteFilenames.set(sourceUrl, folder + '/' + filename);
+    try {
+      id = await chrome.downloads.download({ url: sourceUrl, filename: folder + '/' + filename, conflictAction: 'uniquify', saveAs: false });
+      url = null; // Never persist or log the signed URL.
+      const deadline = Date.now() + 35000;
+      while (Date.now() < deadline) {
+        const [item] = await chrome.downloads.search({ id });
+        if (item?.state === 'complete') return item.fileSize === 0 ? { ok: false } : { ok: true, downloadId: id };
+        if (item?.state === 'interrupted') return { ok: false, expired: ['SERVER_UNAUTHORIZED', 'SERVER_FORBIDDEN'].includes(item.error) };
+        if (run.stopRequested) { await chrome.downloads.cancel(id).catch(() => {}); return { ok: false, cancelled: true }; }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      await chrome.downloads.cancel(id).catch(() => {});
+      return { ok: false };
+    } catch { return { ok: false }; }
+    finally { directNoteFilenames.delete(sourceUrl); }
+  })();
+  directNoteExports.set(key, operation);
+  const result = await operation;
+  // Successful IDs remain deduped until worker completion. Expired interrupted
+  // attempts may refresh once; neither failed request ever invokes native UI.
+  if (result.expired) directNoteExports.delete(key);
+  return result;
+}
+
 function noteExportKey(tabId) { return 'ztd:notes-export:' + tabId; }
-function matchesNotesExport(item, expected) {
+async function notesUrlHash(url) {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(url));
+  return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
+}
+function matchesNotesExport(item, expected, urlHashes = []) {
   if (!expected || expected.expiresAt <= Date.now()) return false;
-  try { return new URL(item.finalUrl || item.url).hostname === 'file-paa.zoom.us' && !!expected.url && (item.url === expected.url || item.finalUrl === expected.url) && !item.byExtensionId; } catch { return false; }
+  try { return [item.url, item.finalUrl].filter(Boolean).some(url => new URL(url).hostname === 'file-paa.zoom.us') && ((!!expected.url && (item.url === expected.url || item.finalUrl === expected.url)) || (!!expected.urlHash && urlHashes.includes(expected.urlHash))) && !item.byExtensionId; } catch { return false; }
 }
 function chooseNotesExport(item, expected, suggest) {
   const filename = expected.folderPath + '/' + expected.filename;
-  const tracked = { ...expected, filename, tabId: expected.tabId };
+  const { url, ...metadata } = expected;
+  const tracked = { ...metadata, filename, tabId: expected.tabId };
   claimedNotesDownloadId = item.id;
   notesDownloadsById.set(item.id, tracked);
   expectedNotesExportsByTab.delete(expected.tabId);
@@ -169,11 +219,18 @@ function chooseFallbackFilename(item, suggest) {
 }
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   (async () => {
+    if (item.byExtensionId) {
+      const filename = item.byExtensionId === chrome.runtime.id && (directNoteFilenames.get(item.url) || directNoteFilenames.get(item.finalUrl));
+      if (filename) suggest({ filename, conflictAction: 'uniquify' });
+      else chooseFallbackFilename(item, suggest);
+      return;
+    }
+    const urlHashes = await Promise.all([item.url, item.finalUrl].filter(url => /^https:\/\/file-paa\.zoom\.us\//i.test(url || '')).map(notesUrlHash));
     // Wait briefly for export-response metadata to reach the isolated worker.
     // An exact URL match avoids routing an unrelated manual download.
     for (let attempt = 0; attempt < 15; attempt++) {
       const stored = await chrome.storage.session.get(null);
-      const pending = Object.entries(stored).filter(([key]) => key.startsWith('ztd:notes-export:')).map(([,value]) => value).find(e => matchesNotesExport(item, e));
+      const pending = [...expectedNotesExportsByTab.values(), ...Object.entries(stored).filter(([key]) => key.startsWith('ztd:notes-export:')).map(([,value]) => value)].find(e => matchesNotesExport(item, e, urlHashes));
       if (pending && claimedNotesDownloadId !== item.id) { chooseNotesExport(item, pending, suggest); return; }
       if (!Object.keys(stored).some(k => k.startsWith('ztd:notes-export:')) || !/^https:\/\/file-paa\.zoom\.us\//i.test(item.url || '')) break;
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -208,6 +265,7 @@ async function pingContentScript(tabId) {
 async function ensureExtensionUi(tabId, url) {
   const notesPage = typeof url === 'string' && NOTES_LIST_RE.test(url);
   if (!notesPage && !isTranscriptPageUrl(url)) return false;
+  if (notesPage) await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['lib/notes-direct.js', 'my-notes-hook.js'] });
   if (await pingContentScript(tabId)) return true;
   await chrome.scripting.insertCSS({ target: { tabId }, files: CONTENT_SCRIPT_CSS_FILES }).catch(() => {});
   await chrome.scripting.executeScript({ target: { tabId }, files: notesPage ? NOTES_CONTENT_FILES : CONTENT_SCRIPT_FILES });
@@ -355,15 +413,26 @@ async function handleSourceWorkerResult(tabId, result) {
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete') {
+  if (changeInfo.status === 'complete' || changeInfo.url) {
     const url = String(tab.url || changeInfo.url || '').split(/[?#]/)[0];
     if (isTranscriptPageUrl(url)) chrome.storage.local.set({ recordingListUrl: url }).catch(() => {});
     if (isNotesListUrl(url)) chrome.storage.local.set({ notesListUrl: url }).catch(() => {});
-    recoveryReady.then(() => { const run = sourceRunByWorkerTab.get(tabId); if (run) startSourceWorkerInTab(run, tabId, url).catch(() => {}); });
+    recoveryReady.then(async () => {
+      const run = sourceRunByWorkerTab.get(tabId);
+      if (!run) return;
+      if (run.currentSource === 'myNotes' && run.workerStarted && /\/(?:login|signin|sign-in|sso)(?:[/?#]|$)/i.test(url)) {
+        if (run.pausingForLogin) return;
+        run.pausingForLogin = true;
+        run.stopRequested = true;
+        await handleSourceWorkerResult(tabId, { saved: 0, skipped: 0, failed: 0, ...run.notesProgress, runId: run.runId, source: 'myNotes', needsUserAction: { url, reason: 'Zoom sign-in is required in this My Notes worker tab. Sign in there, then retry My Notes only; existing downloads are preserved.' } });
+      } else if (changeInfo.status === 'complete') await startSourceWorkerInTab(run, tabId, url);
+    }).catch(() => {});
   }
 });
 
-chrome.tabs.onRemoved.addListener(tabId => { recoveryReady.then(async () => {
+chrome.tabs.onRemoved.addListener(tabId => {
+  for (const key of directNoteExports.keys()) if (key.startsWith(tabId + ':')) directNoteExports.delete(key);
+  recoveryReady.then(async () => {
   const workerRun = sourceRunByWorkerTab.get(tabId);
   if (workerRun && !workerRun.finished) { sourceRunByWorkerTab.delete(tabId); workerRun.workerTabId = null; await finishSourceRun(workerRun, { stopped: true, error: 'Worker tab closed.' }); }
   const originRun = sourceRunByOriginTab.get(tabId);
@@ -425,9 +494,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === 'zoomTranscriptExtension:sourceWorkerProgress') {
-    recoveryReady.then(() => { const run = sourceRunByWorkerTab.get(_sender?.tab?.id);
-    if (run && message.payload?.runId === run.runId) sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'running', message: message.payload?.message || 'Working' });
-    sendResponse({ ok: !!run }); });
+    recoveryReady.then(async () => {
+      const run = sourceRunByWorkerTab.get(_sender?.tab?.id);
+      if (run && message.payload?.runId === run.runId) {
+        if (run.currentSource === 'myNotes' && message.payload?.progress) {
+          const progress = message.payload.progress;
+          run.notesProgress = Object.fromEntries(['saved', 'skipped', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, Math.max(0, Number(progress[key]) || 0)]));
+          await persistRuns();
+        }
+        sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'running', message: message.payload?.message || 'Working' });
+      }
+      sendResponse({ ok: !!run });
+    }).catch(() => sendResponse({ ok: false }));
     return true;
   }
   if (message?.type === 'zoomTranscriptExtension:sourceWorkerCompleted') {
@@ -442,14 +520,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     chrome.storage.local.set(message.settings || {}).then(() => sendResponse({ ok: true }));
     return true;
   }
+  if (message?.type === 'zoomTranscriptExtension:saveMyNotesDirect') {
+    saveMyNotesDirect(message.payload || {}, _sender).then(sendResponse).catch(() => sendResponse({ ok: false })); return true;
+  }
   if (message?.type === 'zoomTranscriptExtension:correlateMyNotesExport') {
     const tabId = _sender?.tab?.id;
     chrome.storage.session.get(noteExportKey(tabId)).then(async stored => {
-      const expected = stored[noteExportKey(tabId)];
+      const expected = expectedNotesExportsByTab.get(tabId) || stored[noteExportKey(tabId)];
       const url = String(message.payload?.url || '');
       if (expected?.exportId !== message.payload?.exportId || !/^https:\/\/file-paa\.zoom\.us\//i.test(url)) { sendResponse({ ok: false }); return; }
-      expected.url = url; expectedNotesExportsByTab.set(tabId, expected);
-      await chrome.storage.session.set({ [noteExportKey(tabId)]: expected }); sendResponse({ ok: true });
+      expected.url = url; expected.urlHash = await notesUrlHash(url); expectedNotesExportsByTab.set(tabId, expected);
+      const { url: signedUrl, ...metadata } = expected;
+      await chrome.storage.session.set({ [noteExportKey(tabId)]: metadata });
+      sendResponse({ ok: true });
     }).catch(() => sendResponse({ ok: false })); return true;
   }
   if (message?.type === 'zoomTranscriptExtension:clearMyNotesExport') {

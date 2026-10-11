@@ -13,6 +13,40 @@
   let panel;
   function setBusy(busy) { for (const id of ['ztd-notes-selected', 'ztd-notes-page']) { const b = panel?.querySelector('#' + id); if (b) b.disabled = busy; } }
   let pendingExportId = null;
+  let cancelDirect = null;
+  function requestDirect(fileId) {
+    if (stopRequested) return Promise.resolve({ kind: 'cancelled' });
+    return new Promise(resolve => {
+      const requestId = 'direct-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      let timer;
+      const finish = value => { clearTimeout(timer); window.removeEventListener('message', listener); cancelDirect = null; resolve(value); };
+      const listener = event => {
+        if (event.source === window && event.data?.source === 'ztd-notes-direct-response' && event.data.requestId === requestId) finish(event.data);
+      };
+      cancelDirect = () => { window.postMessage({ source: 'ztd-notes-direct-request', action: 'cancel', requestId }, location.origin); finish({ kind: 'cancelled' }); };
+      window.addEventListener('message', listener);
+      // Accommodates two bounded Retry-After waits; timeout is a failure, never
+      // an invitation to click a native export while a request may still finish.
+      timer = setTimeout(() => { window.postMessage({ source: 'ztd-notes-direct-request', action: 'cancel', requestId }, location.origin); finish({ kind: 'failed' }); }, 150000);
+      window.postMessage({ source: 'ztd-notes-direct-request', requestId, fileId }, location.origin);
+    });
+  }
+  async function saveDirect(entry, config) {
+    for (let refresh = 0; refresh < 2; refresh++) {
+      const response = await requestDirect(entry.id);
+      if (stopRequested) return { kind: 'cancelled' };
+      if (response.kind !== 'ready') return response;
+      if (response.expiresAt <= Date.now() + 1000) {
+        if (!refresh) continue;
+        return { kind: 'failed' };
+      }
+      const saved = await say('saveMyNotesDirect', { exportId: config.runId + ':' + entry.id, url: response.url, expiresAt: response.expiresAt, filename: entry.targetFilename, folderPath: config.folderPath });
+      if (saved?.ok) return { kind: 'saved' };
+      if (saved?.cancelled || stopRequested) return { kind: 'cancelled' };
+      if (saved?.expired && !refresh) continue;
+      return { kind: 'failed' };
+    }
+  }
   window.addEventListener('message', event => {
     if (event.source !== window || event.data?.source !== 'ztd-notes-export-metadata' || !pendingExportId) return;
     say('correlateMyNotesExport', { exportId: pendingExportId, url: event.data.url }).catch(() => {});
@@ -172,7 +206,7 @@
   async function processNotes(config) {
     stopRequested = config.stopRequested === true;
     activeWorker = true;
-    const result = { runId: config.runId, source: 'myNotes', saved: 0, skipped: 0, failed: 0, stopped: false, needsUserAction: null, processed: 0, discovered: 0, eligible: 0, pending: 0, skipReasons: {} };
+    const result = { runId: config.runId, source: 'myNotes', saved: 0, skipped: 0, failed: 0, stopped: false, needsUserAction: null, processed: 0, discovered: 0, eligible: 0, directSaved: 0, fallbackSaved: 0, pending: 0, skipReasons: {} };
     let entries = [];
     const visited = new Set();
     try {
@@ -186,51 +220,34 @@
       const discoveredRows = config.scope?.notes || (config.scope?.labels ? config.scope.labels.map(label => ({ ...sourcesApi.parseNoteListLabel(label), label })) : await collectNotes(allPages));
       const rows = config.testLimit ? discoveredRows.slice(0, config.testLimit) : discoveredRows;
       result.discovered = rows.length;
-      await say('sourceWorkerProgress', { runId: config.runId, message: 'Discovered ' + rows.length + ' notes; checking transcript access.' });
+      await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result }, message: 'Discovered ' + rows.length + ' notes; checking transcript access.' });
+      // Plan filenames from every discovered item, before access filtering.
+      // Unknown permission metadata is not a denial; export/UI decides access.
+      const planned = new Map();
+      for (const row of rows) { const key = row.id || row.label; if (!planned.has(key)) planned.set(key, row); }
+      entries = sourcesApi.collisionSafeNoteFilenames([...planned.values()], { filenamePattern: config.settings?.filenamePattern });
+      result.discovered = entries.length;
+      let directAvailable = true;
       let root = scrollRoot();
-      root.scrollTop = 0;
-      const eligible = [];
-      for (let index = 0; index < rows.length; index++) {
-        if (stopRequested) { result.stopped = true; break; }
-        const candidate = rows[index];
-        const row = await findRowForLabel(candidate.label, root, true, candidate.id);
-        if (!row) throw new Error('My Notes list lookup failed during ' + (entries.length ? 'export' : 'access checking') + '; could not rediscover a planned note. Retry My Notes only.');
-        const listPath = location.pathname;
-        row.click();
-        if (!await waitForRoute(listPath, 12000, candidate.id)) throw new Error('My Notes detail did not render for the planned note during access checking. Retry My Notes only.');
-        if (isLoginBlocker()) {
-          result.needsUserAction = { url: location.origin + location.pathname, reason: 'Zoom sign-in is required in the dedicated My Notes worker tab.' };
-          break;
-        }
-        const noteId = currentNoteId();
-        if (candidate.id && candidate.id !== noteId) { result.failed += 1; history.back(); await waitForList(); root = scrollRoot(); continue; }
-        if (!noteId || visited.has(noteId)) { result.skipped += 1; history.back(); await waitForList(); root = scrollRoot(); continue; }
-        visited.add(noteId);
-        const tab = await transcriptTab();
-        const download = tab ? await clickTranscriptDownload() : null;
-        if (stopRequested) { result.stopped = true; break; }
-        if (isLoginBlocker()) { result.needsUserAction = { url: location.origin + location.pathname, reason: 'Sign in to Zoom in this My Notes worker tab, then retry My Notes only.' }; break; }
-        if (!tab || !download) {
-          result.skipped += 1;
-          const reason = !tab ? 'No transcript access control.' : 'No enabled Download transcript control.';
-          result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1;
-        }
-        else eligible.push({ ...candidate, id: noteId });
-        history.back();
-        if (!await waitForList()) {
-          if (isLoginBlocker()) { result.needsUserAction = { url: location.origin + location.pathname, reason: 'Sign in to Zoom in this My Notes worker tab, then retry My Notes only.' }; break; }
-          throw new Error('My Notes did not return to All notes after a detail visit/export. Retry My Notes only; completed downloads are preserved.');
-        }
-        root = scrollRoot();
-      }
-      entries = sourcesApi.collisionSafeNoteFilenames(sourcesApi.dedupeNotes(eligible), { filenamePattern: config.settings?.filenamePattern });
-      result.eligible = entries.length;
-      if (result.needsUserAction || result.stopped) return result;
-      await say('sourceWorkerProgress', { runId: config.runId, message: 'Found ' + entries.length + ' exportable transcripts; skipped ' + result.skipped + '.' });
-      root = scrollRoot();
-      root.scrollTop = 0;
       for (const entry of entries) {
         if (stopRequested || result.needsUserAction) { result.stopped = stopRequested; break; }
+        if (visited.has(entry.id || entry.label)) continue;
+        visited.add(entry.id || entry.label);
+        if (entry.id && directAvailable) {
+          const direct = await saveDirect(entry, config);
+          if (isLoginBlocker()) { result.needsUserAction = { url: location.origin + '/allNotes', reason: 'Zoom sign-in is required in the dedicated My Notes worker tab.' }; break; }
+          if (direct.kind === 'unavailable') directAvailable = false;
+          else {
+            if (direct.kind === 'cancelled') { result.stopped = true; break; }
+            if (direct.kind === 'login') { result.needsUserAction = { url: location.origin + '/allNotes', reason: 'Zoom sign-in is required in the dedicated My Notes worker tab. Sign in there, then retry My Notes only.' }; break; }
+            result.processed += 1;
+            if (direct.kind === 'saved') { result.saved += 1; result.directSaved += 1; result.eligible += 1; }
+            else if (direct.kind === 'inaccessible') { result.skipped += 1; const reason = 'Export denied or transcript unavailable (HTTP ' + direct.status + ').'; result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1; }
+            else { result.failed += 1; result.error = direct.kind === 'rateLimit' ? 'Zoom rate limit reached; stopped after bounded Retry-After retries. Retry My Notes only later.' : 'Authenticated My Notes export failed; stopped to avoid duplicate or misattributed downloads. Retry My Notes only.'; break; }
+            await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: Math.max(0, result.discovered - result.saved - result.skipped - result.failed) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
+            continue;
+          }
+        }
         const row = await findRowForLabel(entry.label, root, true, entry.id);
         if (!row) throw new Error('My Notes list lookup failed during ' + (entries.length ? 'export' : 'access checking') + '; could not rediscover a planned note. Retry My Notes only.');
         const listPath = location.pathname;
@@ -241,15 +258,26 @@
           break;
         }
         const noteId = currentNoteId();
-        if (!noteId || noteId !== entry.id) { result.skipped += 1; history.back(); await waitForList(); root = scrollRoot(); continue; }
+        if (!noteId || (entry.id && noteId !== entry.id)) { result.skipped += 1; history.back(); await waitForList(); root = scrollRoot(); continue; }
+        if (!entry.id && visited.has(noteId)) { result.skipped += 1; history.back(); if (!await waitForList()) throw new Error('My Notes list did not return after duplicate detection.'); root = scrollRoot(); continue; }
+        visited.add(noteId);
         const tab = await transcriptTab();
         const download = tab ? await clickTranscriptDownload() : null;
-        if (!tab || !download) { result.skipped += 1; history.back(); await waitForList(); root = scrollRoot(); continue; }
+        if (isLoginBlocker()) { result.needsUserAction = { url: location.origin + '/allNotes', reason: 'Zoom sign-in is required in the dedicated My Notes worker tab.' }; break; }
+        if (!tab || !download) {
+          if (stopRequested) { result.stopped = true; break; }
+          result.skipped += 1;
+          const reason = !tab ? 'No transcript access control.' : 'No enabled Download transcript control.';
+          result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1;
+          history.back(); if (!await waitForList()) throw new Error('My Notes did not return to All notes after access checking. Retry My Notes only.'); root = scrollRoot(); continue;
+        }
+        result.eligible += 1;
         if (stopRequested) { result.stopped = true; break; }
         const filename = entry.targetFilename;
         const exportId = 'notes-' + Date.now() + '-' + result.processed;
         const armed = await say('expectMyNotesExport', { exportId, filename, folderPath: config.folderPath });
         if (!armed?.ok) throw new Error('My Notes export could not be armed: ' + (armed?.error || 'worker unavailable') + '. Retry My Notes only.');
+        if (stopRequested) { await say('clearMyNotesExport', { exportId }); result.stopped = true; break; }
         status('My Notes: exporting ' + filename);
         const finishedPromise = new Promise(resolve => {
           const timeout = setTimeout(() => { chrome.runtime.onMessage.removeListener(listener); resolve({ ok: false, timedOut: true }); }, 35000);
@@ -265,10 +293,10 @@
         pendingExportId = null;
         await say('clearMyNotesExport', { exportId });
         result.processed += 1;
-        if (finished.ok) result.saved += 1;
+        if (finished.ok) { result.saved += 1; result.fallbackSaved += 1; }
         else if (finished.timedOut && isLoginBlocker()) result.needsUserAction = { url: location.origin + location.pathname, reason: 'My Notes export is blocked by a sign-in or permission prompt.' };
         else { result.failed += 1; result.error = finished.error || 'My Notes download was interrupted.'; if (finished.timedOut) { result.error = 'Export did not complete in time; stopped to avoid attributing a late download to another note.'; break; } }
-        await say('sourceWorkerProgress', { runId: config.runId, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
+        await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: Math.max(0, result.discovered - result.saved - result.skipped - result.failed) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
         history.back();
         if (!await waitForList()) {
           if (isLoginBlocker()) { result.needsUserAction = { url: location.origin + location.pathname, reason: 'Sign in to Zoom in this My Notes worker tab, then retry My Notes only.' }; break; }
@@ -280,6 +308,7 @@
       result.failed += 1;
       result.error = String(error);
     } finally {
+      if (pendingExportId) { await say('clearMyNotesExport', { exportId: pendingExportId }).catch(() => {}); pendingExportId = null; }
       result.pending = Math.max(0, result.discovered - result.saved - result.skipped - result.failed);
       result.stopped = result.stopped || stopRequested;
       activeWorker = false;
@@ -320,7 +349,7 @@
       const reply = await say('startSourceRun', { selected: ['myNotes'], settings, currentSource: 'myNotes', mode: 'page', originUrl: location.href, scope: { notes: readRows().map(({ row, ...meta }) => meta) } });
       if (!reply?.ok) { setBusy(false); status(reply?.error || 'Could not start the batch.'); }
     });
-    panel.querySelector('#ztd-notes-stop').addEventListener('click', () => { stopRequested = true; say('stopSourceRun'); status('Stop requested; finishing current export.'); });
+    panel.querySelector('#ztd-notes-stop').addEventListener('click', () => { stopRequested = true; cancelDirect?.(); say('stopSourceRun'); status('Stop requested; no new exports will start.'); });
     return panel;
   }
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -344,7 +373,7 @@
       updateResults({ sources: payload.results || {}, needsUserAction: payload.needsUserAction || null, folder: payload.folderName });
       return false;
     }
-    if (message?.type === NS + ':stopSourceWorker') { stopRequested = true; sendResponse({ ok: true }); return false; }
+    if (message?.type === NS + ':stopSourceWorker') { stopRequested = true; cancelDirect?.(); sendResponse({ ok: true }); return false; }
   });
   addPanel();
 })();

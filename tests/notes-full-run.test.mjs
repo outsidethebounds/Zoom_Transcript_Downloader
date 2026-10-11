@@ -4,8 +4,10 @@ import vm from 'node:vm';
 import sources from '../lib/sources.js';
 const code = fs.readFileSync(new URL('../my-notes.js', import.meta.url), 'utf8')
   .replace('  addPanel();\n})();', '  globalThis.adapter = { processNotes, readRows, findRowForLabel, clickTranscriptDownload, waitForDom };\n})();');
-async function run({ stopAfter = 0, missing = false, scope = null, stopAccessIndex = -1, loginAccessIndex = -1, routeFailureIndex = -1, allAccessible = false } = {}) {
+async function run({ stopAfter = 0, missing = false, scope = null, stopAccessIndex = -1, loginAccessIndex = -1, routeFailureIndex = -1, allAccessible = false, direct = false, directKind = 'ready', stopDirect = false, expireOnce = false, expireAlways = false, lateDirect = false } = {}) {
+  let directRequests = 0, directSaves = 0;
   let clock = 0, detail = null, count = 20, armed = null, saved = 0, root;
+  const windowListeners = new Set();
   const listeners = new Set(), messages = [], roots = [], observers = new Set();
   const location = { pathname: '/allNotes', origin: 'https://us01mynotes.zoom.us' };
   const notes = Array.from({ length: 32 }, (_, index) => ({
@@ -62,10 +64,22 @@ async function run({ stopAfter = 0, missing = false, scope = null, stopAccessInd
   };
   const chrome = { runtime: {
     onMessage: { addListener: f => listeners.add(f), removeListener: f => listeners.delete(f) },
-    async sendMessage(message) { messages.push(message); if (message.type.endsWith(':expectMyNotesExport')) armed = message.payload.exportId; return { ok: true }; },
+    async sendMessage(message) { messages.push(message);
+      if (message.type.endsWith(':saveMyNotesDirect')) {
+        assert.equal(detail, null, 'direct export never opens detail');
+        directSaves++;
+        if (expireAlways || (expireOnce && directSaves === 1)) return { ok: false, expired: true };
+        saved++;
+        if (saved === stopAfter) for (const listener of [...listeners]) listener({ type: 'zoomTranscriptExtension:stopSourceWorker' }, {}, () => {});
+      }
+      if (message.type.endsWith(':expectMyNotesExport')) armed = message.payload.exportId; return { ok: true }; },
   } };
   const context = vm.createContext({ chrome, document, location, ZTDSources: sources,
-    window: { addEventListener() {}, removeEventListener() {}, postMessage() { count = 32; } },
+    window: { addEventListener(type, fn) { if (type === 'message') windowListeners.add(fn); }, removeEventListener(type, fn) { windowListeners.delete(fn); }, postMessage(data) { if (data.source === 'ztd-notes-load-more') count = 32; if (data.source === 'ztd-notes-direct-request' && data.action !== 'cancel') {
+        directRequests++;
+        if (stopDirect) for (const listener of [...listeners]) listener({ type: 'zoomTranscriptExtension:stopSourceWorker' }, {}, () => {});
+        queueMicrotask(() => { for (const fn of windowListeners) fn({source: context.window, data: {source: 'ztd-notes-direct-response', requestId: data.requestId, kind: direct ? directKind : 'unavailable', status: directKind === 'inaccessible' ? 403 : 401, url: 'https://file-paa.zoom.us/ephemeral', expiresAt: 1e12}}); });
+      } } },
     history: { back() { queueMicrotask(() => { detail = null; location.pathname = '/allNotes'; count = 20; newRoot(); }); } },
     getComputedStyle: () => ({ overflowY: 'auto' }),
     Date: { now: () => clock },
@@ -75,35 +89,35 @@ async function run({ stopAfter = 0, missing = false, scope = null, stopAccessInd
   });
   vm.runInContext(code, context);
   const result = await context.adapter.processNotes({ runId: 'production-full', mode: scope ? 'page' : 'all', scope, folderPath: 'Batch/My Notes', worker: true, settings: {} });
-  return { result, messages, saved, roots, context, document, observers };
+  return { result, messages, saved, directRequests, directSaves, roots, context, document, observers };
 }
 const full = await run();
 assert.deepEqual(JSON.parse(JSON.stringify({ saved: full.result.saved, skipped: full.result.skipped, failed: full.result.failed, processed: full.result.processed, discovered: full.result.discovered, eligible: full.result.eligible, pending: full.result.pending })),
   { saved: 29, skipped: 3, failed: 0, processed: 29, discovered: 32, eligible: 29, pending: 0 });
 assert.equal(full.saved, 29, 'one native export per successful note; no artificial testLimit/scope');
-assert.ok(full.roots.length > 50, 'SPA replaces root on every return, including export phase');
+assert.ok(full.roots.length > 30, 'SPA replaces root on every return, in the single fallback pass');
 assert.equal(full.messages.filter(m => m.type.endsWith(':expectMyNotesExport')).length, 29);
 assert.ok(full.messages.filter(m => m.type.endsWith(':expectMyNotesExport')).some(m => m.payload.filename.includes('unknown-date')), 'title-only rows remain in discovery');
 assert.equal(full.result.skipReasons['No transcript access control.'], 1);
 assert.equal(full.result.skipReasons['No enabled Download transcript control.'], 2);
 const accessStop = await run({ stopAccessIndex: 2 });
-assert.equal(accessStop.result.stopped, true); assert.equal(accessStop.result.skipped, 0); assert.equal(accessStop.result.pending, 32);
+assert.equal(accessStop.result.stopped, true); assert.equal(accessStop.result.skipped, 0); assert.equal(accessStop.result.pending, 30);
 const login = await run({ loginAccessIndex: 2 });
 assert.equal(login.result.failed, 0); assert.match(login.result.needsUserAction.reason, /sign-in/);
-assert.equal(login.result.pending, 32);
+assert.equal(login.result.pending, 30);
 // Old code continued on the final detail page after route timeout, then skipped
 // all planned exports because no list rows remained: the reported 0/24/1/0 pattern.
 const routeFailure = await run({ routeFailureIndex: 31, allAccessible: true });
-assert.equal(routeFailure.result.saved, 0); assert.equal(routeFailure.result.skipped, 0);
-assert.equal(routeFailure.result.failed, 1); assert.equal(routeFailure.result.pending, 31);
-assert.match(routeFailure.result.error, /detail did not render.*access checking/);
+assert.equal(routeFailure.result.saved, 31); assert.equal(routeFailure.result.skipped, 0);
+assert.equal(routeFailure.result.failed, 1); assert.equal(routeFailure.result.pending, 0);
+assert.match(routeFailure.result.error, /detail did not render.*export/);
 const failure = await run({ missing: true });
 assert.equal(failure.result.failed, 1);
 assert.match(failure.result.error, /list lookup failed.*Retry My Notes only/);
-assert.equal(failure.result.saved, 0, 'preflight failure must not export a partial plan');
+assert.equal(failure.result.saved, 18, 'lookup failure preserves already completed exports');
 assert.equal(failure.result.discovered, failure.result.saved + failure.result.skipped + failure.result.failed + failure.result.pending);
 const stopped = await run({ stopAfter: 1 });
-assert.equal(stopped.result.saved, 1); assert.equal(stopped.result.stopped, true); assert.equal(stopped.result.pending, 28);
+assert.equal(stopped.result.saved, 1); assert.equal(stopped.result.stopped, true); assert.equal(stopped.result.pending, 31);
 const page = await run({ scope: { notes: [{ id: 'opaque-30', label: 'Undated note 30', title: 'Undated note 30', dateISO: 'unknown-date' }] } });
 assert.equal(page.result.saved, 1, 'unknown permission schema is not default-denied when UI permits export');
 assert.equal(page.result.discovered, 1, 'current-page scope is preserved');
@@ -115,4 +129,27 @@ ready = true;
 for (const observer of [...full.observers]) observer.callback();
 assert.equal(await eventWait, true, 'DOM readiness must not depend on a chained polling timer');
 assert.equal(full.observers.size, 0, 'readiness observer cleans up after resolution');
+const directFull = await run({direct:true});
+assert.equal(directFull.result.saved,32);assert.equal(directFull.result.directSaved,32);assert.equal(directFull.result.fallbackSaved,0);
+assert.equal(directFull.roots.length,1,'no detail navigation/preflight from list IDs');
+assert.equal(directFull.directRequests,32);assert.equal(directFull.directSaves,32);
+assert.equal(directFull.messages.filter(m=>m.type.endsWith(':expectMyNotesExport')).length,0,'no native arm/click in direct mode');
+const directStop = await run({direct:true,stopAfter:1});
+assert.equal(directStop.result.saved,1);assert.equal(directStop.result.pending,31);assert.equal(directStop.directRequests,1);
+const late = await run({direct:true,stopDirect:true});
+assert.equal(late.result.stopped,true);assert.equal(late.result.saved,0);assert.equal(late.directSaves,0);assert.equal(late.directRequests,1,'late response ignored, no next request');
+const expired = await run({direct:true,expireOnce:true,scope:{notes:[{id:'opaque-1',label:'Note 1',title:'Note 1'}]}});
+assert.equal(expired.result.saved,1);assert.equal(expired.directRequests,2);assert.equal(expired.result.fallbackSaved,0,'refresh once without native fallback');
+const denied = await run({direct:true,directKind:'inaccessible'});
+assert.equal(denied.result.skipped,32);assert.equal(denied.result.failed,0);assert.equal(denied.roots.length,1,'403 never invokes UI');
+const directLogin = await run({direct:true,directKind:'login'});
+assert.equal(directLogin.result.needsUserAction.reason.includes('sign-in'),true);assert.equal(directLogin.result.failed,0);assert.equal(directLogin.directRequests,1);
+const rate = await run({direct:true,directKind:'rateLimit'});
+assert.equal(rate.result.failed,1);assert.equal(rate.directRequests,1);assert.equal(rate.roots.length,1,'rate limit does not fall back aggressively');
+const idless = await run({scope:{notes:[{label:'Note 1 2026-10-11 10:00(GMT-4:00)',title:'Note 1'}]}});
+assert.equal(idless.result.discovered,1);assert.equal(idless.result.fallbackSaved,1,'missing list ID uses label lookup and validates native detail rather than dropping discovery');
+assert.equal(idless.directRequests,0);
+const alwaysExpired = await run({direct:true,expireAlways:true,scope:{notes:[{id:'opaque-1',label:'Note 1',title:'Note 1'}]}});
+assert.equal(alwaysExpired.result.failed,1);assert.equal(alwaysExpired.result.saved,0);assert.equal(alwaysExpired.directRequests,2);assert.equal(alwaysExpired.directSaves,2);
+assert.equal(alwaysExpired.result.fallbackSaved,0,'expired signed files never cause an extra native download');
 console.log('notes-full-run.test.mjs: all tests passed');

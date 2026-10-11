@@ -53,6 +53,7 @@
         "https://*.zoom.us/allNotes*"
       ],
       "js": [
+        "lib/notes-direct.js",
         "my-notes-hook.js"
       ],
       "run_at": "document_start",
