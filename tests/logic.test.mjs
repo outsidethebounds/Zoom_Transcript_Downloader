@@ -48,6 +48,35 @@ function run() {
     dateText: 'Apr 18, 2026 7:01 AM',
   });
 
+  for (const title of ['IMP Technical team introduction to Wes', 'Imprivata - on site chat']) {
+    const parsedTeams = parseRowText(`${title} - Apr 4, 2026 9:30 AM 1 day Download Delete`);
+    assert.deepEqual(parsedTeams, { title, meetingId: '', dateText: 'Apr 4, 2026 9:30 AM' });
+  }
+
+  for (const title of ['IMP Technical team introduction to Wes', 'Imprivata - on site chat']) {
+    const parsedLiveTeams = parseRowText(`${title} From Microsoft Teams - attendee@example.com Oct 8, 2026 04:19 PM 28 days Download Delete`);
+    assert.deepEqual(parsedLiveTeams, { title, meetingId: '', dateText: 'Oct 8, 2026 04:19 PM' });
+  }
+
+  const parsedTeamsPlural = parseRowText('IMP Technical team introduction to Wes - Apr 4, 2026 9:30 AM 3 days Download Delete');
+  assert.deepEqual(parsedTeamsPlural, {
+    title: 'IMP Technical team introduction to Wes',
+    meetingId: '',
+    dateText: 'Apr 4, 2026 9:30 AM',
+  });
+
+  const parsedDashId = parseRowText('Imprivata - on site chat - user@example.com Apr 4, 2026 9:30 AM 1 day Download Delete');
+  assert.deepEqual(parsedDashId, { title: 'Imprivata - on site chat', meetingId: '', dateText: 'Apr 4, 2026 9:30 AM' });
+
+  const noIdNames = applyCollisionSafeFilenames([
+    { targetBase: buildTargetBase({ title: 'IMP Technical team introduction to Wes', meetingId: '', dateText: 'Apr 4, 2026 9:30 AM' }, { filenamePattern: '{date} - {time} - {title}', includeMeetingId: true }), meetingId: '' },
+    { targetBase: buildTargetBase({ title: 'Imprivata - on site chat', meetingId: '', dateText: 'Apr 4, 2026 9:30 AM' }, { filenamePattern: '{date} - {time} - {title}', includeMeetingId: true }), meetingId: '' },
+  ]);
+  assert.deepEqual(noIdNames.map(entry => entry.targetFilename), [
+    '2026-04-04 - 0930 - IMP Technical team introduction to Wes.txt',
+    '2026-04-04 - 0930 - Imprivata - on site chat.txt',
+  ]);
+
   console.log('logic.test.mjs: all tests passed');
 }
 
