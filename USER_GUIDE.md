@@ -340,4 +340,8 @@ The extension leaves your list in place and works sequentially in inactive worke
 
 Files go beneath ZoomTranscripts-MMDDYYYY into **Recordings/** and **My Notes/** folders under the configured Downloads subfolder. Cross-source overlap is preserved. My Notes requires transcript access and an enabled Zoom export control; inaccessible notes are skipped. A timed-out export stops the notes pass to avoid attributing a late file to the next note. My Notes IDs are opaque note identifiers, not meeting IDs.
 
+Title-only notes are included in discovery. If their list entry has no date/time, filenames use `unknown-date` / `unknown-time` rather than dropping the note. The report includes discovered, eligible, processed exports, pending notes, and skip reasons. A navigation failure is an error, not an inaccessible-note skip.
+
+If recordings completed but My Notes failed, uncheck Recording transcripts and retry **My Notes only**. Existing files are preserved; filename conflicts are uniquified, never overwritten.
+
 Older screenshots and printable PDFs show the recordings-only UI and have not been regenerated for this feature.

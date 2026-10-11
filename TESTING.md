@@ -20,6 +20,7 @@ node tests/source-logic.test.mjs
 node tests/source-plan.test.mjs
 node tests/coordinator.test.mjs
 node tests/notes-worker.test.mjs
+node tests/notes-full-run.test.mjs
 node tests/page-hook-worker.test.mjs
 ```
 
@@ -93,10 +94,28 @@ If test coverage is added, prioritize:
 
 Coordinator mocks cover recording-first order, inactive workers, bounded testLimit in both adapters, wrong-run result rejection, sequential completion, MV3 session restoration, Stop, login pause, exact native export filename routing, unrelated manual URLs, and terminal export delivery after suspension. Notes worker fixtures cover current-list scope, incremental pagination/stable-ID deduplication, disabled export controls, and opaque detail routes. Source tests cover source defaults/persistence normalization, source folders, collision names, and independent source summaries.
 
-For a controlled live check, use the production startSourceRun message with testLimit: 1 (not a full collection click). Both adapters enforce the bound. Inspect artifact sizes/counts only; never print transcript bodies, cookies, or signed export URLs. Reset any CDP allowAndName download override before testing filename routing. Full authenticated 59/32-item collections are intentionally not part of the small recovery smoke test.
+For a controlled live check, use the production startSourceRun message with testLimit: 1 (not a full collection click). Both adapters enforce the bound. Inspect artifact sizes/counts only; never print transcript bodies, cookies, or signed export URLs. Reset any CDP allowAndName download override before testing filename routing. A bounded first-row smoke test is not full-collection acceptance: it does not exercise repeated SPA returns, replacement scroll elements, or title-only notes. After a My Notes navigation change, separately verify an unrestricted My Notes-only run via Save selected sources; never repeat successful recordings for that check.
 
 ### Recovery smoke evidence (2026-10-11)
 
-Headed Chrome for Testing 155, authenticated dedicated profile, production coordinator with testLimit 1. Sequential selected-source run exported one recording (47,649 bytes) and one My Notes transcript (27,687 bytes), complete and nonempty, into their separate dated source folders. Origin stayed on All notes; both inactive workers closed; no active runs remained. Tests inspected artifact metadata only. Earlier recovery probes exposed and corrected a preexisting CDP allowAndName override, missing DownloadItem.tabId, and asynchronous tooltip readiness; preexisting/probe files were retained, not deleted. Full collection and real login/permission expiry remain manual release checks; mocks cover auth pause/stop/session restoration.
+Headed Chrome for Testing 155, authenticated dedicated profile, production coordinator with testLimit 1. Sequential selected-source run exported one recording (47,649 bytes) and one My Notes transcript (27,687 bytes), complete and nonempty, into their separate dated source folders. Origin stayed on All notes; both inactive workers closed; no active runs remained. Tests inspected artifact metadata only. Earlier recovery probes exposed and corrected a preexisting CDP allowAndName override, missing DownloadItem.tabId, and asynchronous tooltip readiness; preexisting/probe files were retained, not deleted. At that smoke-test stage, full collection and real login/permission expiry remained unverified; mocks covered auth pause/stop/session restoration. The full-collection result below supersedes that gap for the tested account.
 
 Live metadata-only pagination probe confirmed 20 initial rows expand to 32 through Zoom’s existing onLoadMore UI callback. The MAIN-world bridge invokes that callback only at the list bottom; no raw authenticated list API is replayed.
+
+### Full-run regression coverage
+
+`notes-full-run.test.mjs` drives the production adapter without `testLimit` or an injected full-run scope. The 32-item DOM fixture starts with 20 list rows, reloads only 20 rows after each detail visit, replaces the scroll element on every return, includes title-only labels and inaccessible controls, and correlates one terminal native export per planned note. It also checks Stop, current-page scope, unknown permission metadata with an enabled UI control, and actionable rediscovery failure with pending counts. `notes-worker.test.mjs` rejects unrelated global tooltip text as export-control identification.
+
+The original notes-worker suite never called `processNotes`; its discovery-only pagination fixture and one-row production smoke could not expose this repeated-navigation defect. The new full-run fixture fails against f06fd6a (21 saved / 4 skipped rather than the fixture’s 29 eligible saves / 3 genuine skips; seven title-only notes were omitted).
+
+An additional fixture reproduces the user’s exact pre-fix report: `saved: 0, skipped: 24, failed: 1, processed: 0`, with no error cause. With f06fd6a, the final dated note’s detail-readiness timeout increments `failed` and continues without returning to All notes. The export phase then searches the detail page for list rows and falsely skips all 24 planned exports. The corrected adapter stops that path with a stage-specific error and pending count instead. Live pre-fix notes-only reproduction also failed after 15 saves with no cause; the original result alone did not identify which silent navigation branch fired.
+
+Metadata-only live checks confirmed list items contain stable string IDs, titles, string updated times, participants, and an optional meeting object; they do not provide a mandatory permission/recording Boolean. Detail permission state uses Boolean `hasPermission` / `canAccessTranscript` and an object `downloadTranscriptPrivilege`. Eligibility remains the enabled native Download transcript control, not a guessed or default-false permission field. A hidden-worker 100 ms timer took 1,023 ms; route/list/control waits now react to DOM mutations instead of chained readiness polling.
+
+### Corrected unrestricted production evidence (2026-10-11)
+
+Headed Chrome for Testing 155, existing authenticated dedicated profile, **Save selected sources** clicked with only My Notes selected. The coordinator snapshot confirmed `testLimit: null`, `scope: null`, and no recordings in the selected plan. Production discovery included all 32 rows (20 initial plus pagination), including seven title-only rows. Final report: **31 saved, 1 genuinely inaccessible skipped, 0 failed, 31 processed exports, 32 discovered, 31 eligible, 0 pending, not stopped, no user action required**.
+
+Chrome reported exactly 31 complete downloads with 31 unique final file paths, all under `ZoomTranscripts-10112026/My Notes/`, and zero recording downloads in this run. The 31 new nonempty files total 1,634,087 bytes (171–195,787 bytes). Existing collision behavior preserved all 17 earlier diagnostic files; none were overwritten. All 55 recording files remained byte-for-byte unchanged (2,433,527 bytes total). One origin tab remained on All notes; the inactive worker closed, active run count was zero, and no pending export/download session keys remained. Artifact checks used sizes, hashes, timestamps, and counts only—never transcript content or authentication data.
+
+All eight suites, JavaScript/module syntax checks, and `git diff --check` pass. The original seven suites remain unchanged in purpose; the new full-run and frozen-timer cases close the bounded-test coverage gap. Real future login/permission expiry remains environment-dependent; mock regressions exercise pause and Stop.

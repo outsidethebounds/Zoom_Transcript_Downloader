@@ -1161,10 +1161,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     setSaveAllRunning(false);
     const payload = message.payload || {};
     const summary = { folder: payload.folderName, sources: payload.results, needsUserAction: payload.needsUserAction || null };
+    const sourceError = Object.entries(payload.results || {}).find(([, result]) => result?.error);
     const activity = document.querySelector('#ztd-activity-note');
-    if (activity) activity.textContent = payload.needsUserAction ? 'Action needed: ' + payload.needsUserAction.reason + ' (' + payload.needsUserAction.url + ')' : 'Source batch finished. See per-source saved / skipped / failed counts below.';
+    if (activity) activity.textContent = payload.needsUserAction ? 'Action needed: ' + payload.needsUserAction.reason + ' (' + payload.needsUserAction.url + ')' : sourceError ? (sourceError[0] === 'myNotes' ? 'My Notes' : 'Recordings') + ' failed: ' + sourceError[1].error : 'Source batch finished. See per-source saved / skipped / failed counts below.';
     setOutput(summary);
     if (payload.needsUserAction) showToast('Action needed in the dedicated Zoom worker tab.', 'warn', 8000);
+    else if (sourceError) showToast('A source failed. See the error and completed-download counts below.', 'warn', 8000);
     else showToast('Selected source batch finished.', 'success', 5000);
     return false;
   }

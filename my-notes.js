@@ -21,7 +21,7 @@
   function readRows() {
     return [...document.querySelectorAll(LIST_SELECTOR)].map((row, index) => {
       const label = row.getAttribute('aria-label') || '';
-      const meta = sourcesApi.parseNoteListLabel(label);
+      const meta = sourcesApi.parseNoteListLabel(label) || (label.trim() ? { title: label.trim(), dateISO: 'unknown-date', timeHHMM: 'unknown-time' } : null);
       return meta ? { ...meta, id: row.getAttribute('data-ztd-note-id') || '', label, index, row } : null;
     }).filter(Boolean);
   }
@@ -84,29 +84,56 @@
       button.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
       await sleep(800);
       const tip = describedBy ? document.getElementById(describedBy)?.textContent || '' : '';
-      help = tip || [...document.querySelectorAll('[role="tooltip"]')].map(el => el.textContent || '').join(' ');
+      // Only this button's tooltip can identify an export control.
+      help = tip;
       button.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse' }));
       if (/download transcript/i.test(direct + ' ' + help)) return button;
     }
     if (retry && !stopRequested) { await sleep(1500); return clickTranscriptDownload(false); }
     return null;
   }
-  async function waitForRoute(oldPath, timeoutMs = 12000) {
-    const end = Date.now() + timeoutMs;
-    while (Date.now() < end) {
+  // Hidden worker tabs throttle chained timers (eventually to one minute).
+  // Route/control readiness is a DOM event, not a sleep/polling budget.
+  function waitForDom(read, timeoutMs) {
+    return new Promise(resolve => {
+      const initial = read();
+      if (initial !== null) { resolve(initial); return; }
+      let observer;
+      let timeout;
+      const finish = value => {
+        observer?.disconnect();
+        clearTimeout(timeout);
+        window.removeEventListener('popstate', check);
+        resolve(value);
+      };
+      const check = () => { const value = read(); if (value !== null) finish(value); };
+      observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      window.addEventListener('popstate', check);
+      timeout = setTimeout(() => finish(false), timeoutMs);
+      check();
+    });
+  }
+  async function waitForRoute(oldPath, timeoutMs = 12000, expectedId = '') {
+    return waitForDom(() => {
       if (isLoginBlocker()) return true;
-      if (location.pathname !== oldPath && document.querySelector('button[aria-label^="Rename file (current:"]')) return true;
-      await sleep(100);
-    }
-    return false;
+      return location.pathname !== oldPath && (!expectedId || currentNoteId() === expectedId) && !document.querySelector(LIST_SELECTOR) && document.querySelector('button[aria-label^="Rename file (current:"]') ? true : null;
+    }, timeoutMs);
   }
   async function waitForList(timeoutMs = 12000) {
-    const end = Date.now() + timeoutMs;
-    while (Date.now() < end) {
-      if (location.pathname.toLowerCase().includes('/allnotes') && document.querySelector(LIST_SELECTOR)) return true;
-      await sleep(100);
-    }
-    return false;
+    return waitForDom(() => {
+      if (isLoginBlocker()) return false;
+      return location.pathname.toLowerCase().includes('/allnotes') && document.querySelector(LIST_SELECTOR) && !document.querySelector('button[aria-label^="Rename file (current:"]') ? true : null;
+    }, timeoutMs);
+  }
+  async function transcriptTab() {
+    let tab;
+    await waitForDom(() => {
+      if (stopRequested || isLoginBlocker()) return false;
+      tab = [...document.querySelectorAll('button,[role="tab"]')].find(el => (el.textContent || '').trim() === 'Transcript');
+      return tab ? true : null;
+    }, 12000);
+    return tab;
   }
   function status(message) {
     const node = panel?.querySelector('#ztd-notes-status');
@@ -117,6 +144,12 @@
     if (node) node.textContent = JSON.stringify(result, null, 2);
   }
   async function findRowForLabel(label, root, allPages, id = '') {
+    // SPA route transitions replace the scroll element; never scroll a detached root.
+    root = scrollRoot();
+    const current = [...document.querySelectorAll(LIST_SELECTOR)].find(el => id ? el.getAttribute('data-ztd-note-id') === id : el.getAttribute('aria-label') === label);
+    if (current) return current;
+    root.scrollTop = 0;
+    await sleep(300);
     for (let step = 0; step < (allPages ? 300 : 1); step++) {
       const row = [...document.querySelectorAll(LIST_SELECTOR)].find(el => id ? el.getAttribute('data-ztd-note-id') === id : el.getAttribute('aria-label') === label);
       if (row) return row;
@@ -127,14 +160,19 @@
       root.dispatchEvent(new Event('scroll', { bubbles: true }));
       if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) window.postMessage({ source: 'ztd-notes-load-more' }, location.origin);
       await sleep(850);
-      if (root.scrollTop === before) return null;
+      if (root.scrollTop === before) {
+        // onLoadMore/render may complete after the scroll position stops changing.
+        await sleep(850);
+        const last = [...document.querySelectorAll(LIST_SELECTOR)].find(el => id ? el.getAttribute('data-ztd-note-id') === id : el.getAttribute('aria-label') === label);
+        return last || null;
+      }
     }
     return null;
   }
   async function processNotes(config) {
     stopRequested = config.stopRequested === true;
     activeWorker = true;
-    const result = { runId: config.runId, source: 'myNotes', saved: 0, skipped: 0, failed: 0, stopped: false, needsUserAction: null, processed: 0 };
+    const result = { runId: config.runId, source: 'myNotes', saved: 0, skipped: 0, failed: 0, stopped: false, needsUserAction: null, processed: 0, discovered: 0, eligible: 0, pending: 0, skipReasons: {} };
     let entries = [];
     const visited = new Set();
     try {
@@ -147,6 +185,8 @@
       const allPages = config.mode !== 'page';
       const discoveredRows = config.scope?.notes || (config.scope?.labels ? config.scope.labels.map(label => ({ ...sourcesApi.parseNoteListLabel(label), label })) : await collectNotes(allPages));
       const rows = config.testLimit ? discoveredRows.slice(0, config.testLimit) : discoveredRows;
+      result.discovered = rows.length;
+      await say('sourceWorkerProgress', { runId: config.runId, message: 'Discovered ' + rows.length + ' notes; checking transcript access.' });
       let root = scrollRoot();
       root.scrollTop = 0;
       const eligible = [];
@@ -154,10 +194,10 @@
         if (stopRequested) { result.stopped = true; break; }
         const candidate = rows[index];
         const row = await findRowForLabel(candidate.label, root, true, candidate.id);
-        if (!row) { result.skipped += 1; continue; }
+        if (!row) throw new Error('My Notes list lookup failed during ' + (entries.length ? 'export' : 'access checking') + '; could not rediscover a planned note. Retry My Notes only.');
         const listPath = location.pathname;
         row.click();
-        if (!await waitForRoute(listPath)) { result.failed += 1; continue; }
+        if (!await waitForRoute(listPath, 12000, candidate.id)) throw new Error('My Notes detail did not render for the planned note during access checking. Retry My Notes only.');
         if (isLoginBlocker()) {
           result.needsUserAction = { url: location.origin + location.pathname, reason: 'Zoom sign-in is required in the dedicated My Notes worker tab.' };
           break;
@@ -166,50 +206,50 @@
         if (candidate.id && candidate.id !== noteId) { result.failed += 1; history.back(); await waitForList(); root = scrollRoot(); continue; }
         if (!noteId || visited.has(noteId)) { result.skipped += 1; history.back(); await waitForList(); root = scrollRoot(); continue; }
         visited.add(noteId);
-        let tab;
-        const controlsDeadline = Date.now() + 12000;
-        while (Date.now() < controlsDeadline && !stopRequested) {
-          tab = [...document.querySelectorAll('button,[role="tab"]')].find(el => (el.textContent || '').trim() === 'Transcript');
-          if (tab) break;
-          await sleep(200);
-        }
+        const tab = await transcriptTab();
         const download = tab ? await clickTranscriptDownload() : null;
-        if (!tab || !download) { result.skipped += 1; result.skipReason = !tab ? 'No transcript access control.' : 'No enabled Download transcript control.'; }
+        if (stopRequested) { result.stopped = true; break; }
+        if (isLoginBlocker()) { result.needsUserAction = { url: location.origin + location.pathname, reason: 'Sign in to Zoom in this My Notes worker tab, then retry My Notes only.' }; break; }
+        if (!tab || !download) {
+          result.skipped += 1;
+          const reason = !tab ? 'No transcript access control.' : 'No enabled Download transcript control.';
+          result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1;
+        }
         else eligible.push({ ...candidate, id: noteId });
         history.back();
-        if (!await waitForList()) { result.failed += 1; break; }
+        if (!await waitForList()) {
+          if (isLoginBlocker()) { result.needsUserAction = { url: location.origin + location.pathname, reason: 'Sign in to Zoom in this My Notes worker tab, then retry My Notes only.' }; break; }
+          throw new Error('My Notes did not return to All notes after a detail visit/export. Retry My Notes only; completed downloads are preserved.');
+        }
         root = scrollRoot();
       }
       entries = sourcesApi.collisionSafeNoteFilenames(sourcesApi.dedupeNotes(eligible), { filenamePattern: config.settings?.filenamePattern });
+      result.eligible = entries.length;
+      if (result.needsUserAction || result.stopped) return result;
+      await say('sourceWorkerProgress', { runId: config.runId, message: 'Found ' + entries.length + ' exportable transcripts; skipped ' + result.skipped + '.' });
       root = scrollRoot();
       root.scrollTop = 0;
       for (const entry of entries) {
         if (stopRequested || result.needsUserAction) { result.stopped = stopRequested; break; }
         const row = await findRowForLabel(entry.label, root, true, entry.id);
-        if (!row) { result.skipped += 1; continue; }
+        if (!row) throw new Error('My Notes list lookup failed during ' + (entries.length ? 'export' : 'access checking') + '; could not rediscover a planned note. Retry My Notes only.');
         const listPath = location.pathname;
         row.click();
-        if (!await waitForRoute(listPath)) { result.failed += 1; continue; }
+        if (!await waitForRoute(listPath, 12000, entry.id)) throw new Error('My Notes detail did not render for the planned note during export. Retry My Notes only.');
         if (isLoginBlocker()) {
           result.needsUserAction = { url: location.origin + location.pathname, reason: 'Zoom sign-in is required in the dedicated My Notes worker tab.' };
           break;
         }
         const noteId = currentNoteId();
         if (!noteId || noteId !== entry.id) { result.skipped += 1; history.back(); await waitForList(); root = scrollRoot(); continue; }
-        let tab;
-        const controlsDeadline = Date.now() + 12000;
-        while (Date.now() < controlsDeadline && !stopRequested) {
-          tab = [...document.querySelectorAll('button,[role="tab"]')].find(el => (el.textContent || '').trim() === 'Transcript');
-          if (tab) break;
-          await sleep(200);
-        }
+        const tab = await transcriptTab();
         const download = tab ? await clickTranscriptDownload() : null;
         if (!tab || !download) { result.skipped += 1; history.back(); await waitForList(); root = scrollRoot(); continue; }
         if (stopRequested) { result.stopped = true; break; }
         const filename = entry.targetFilename;
         const exportId = 'notes-' + Date.now() + '-' + result.processed;
         const armed = await say('expectMyNotesExport', { exportId, filename, folderPath: config.folderPath });
-        if (!armed?.ok) { result.failed += 1; history.back(); await waitForList(); continue; }
+        if (!armed?.ok) throw new Error('My Notes export could not be armed: ' + (armed?.error || 'worker unavailable') + '. Retry My Notes only.');
         status('My Notes: exporting ' + filename);
         const finishedPromise = new Promise(resolve => {
           const timeout = setTimeout(() => { chrome.runtime.onMessage.removeListener(listener); resolve({ ok: false, timedOut: true }); }, 35000);
@@ -227,15 +267,20 @@
         result.processed += 1;
         if (finished.ok) result.saved += 1;
         else if (finished.timedOut && isLoginBlocker()) result.needsUserAction = { url: location.origin + location.pathname, reason: 'My Notes export is blocked by a sign-in or permission prompt.' };
-        else { result.failed += 1; if (finished.timedOut) { result.error = 'Export did not complete in time; stopped to avoid attributing a late download to another note.'; break; } }
+        else { result.failed += 1; result.error = finished.error || 'My Notes download was interrupted.'; if (finished.timedOut) { result.error = 'Export did not complete in time; stopped to avoid attributing a late download to another note.'; break; } }
         await say('sourceWorkerProgress', { runId: config.runId, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
         history.back();
-        if (!await waitForList()) { result.failed += 1; break; }
+        if (!await waitForList()) {
+          if (isLoginBlocker()) { result.needsUserAction = { url: location.origin + location.pathname, reason: 'Sign in to Zoom in this My Notes worker tab, then retry My Notes only.' }; break; }
+          throw new Error('My Notes did not return to All notes after a detail visit/export. Retry My Notes only; completed downloads are preserved.');
+        }
+        root = scrollRoot();
       }
     } catch (error) {
       result.failed += 1;
       result.error = String(error);
     } finally {
+      result.pending = Math.max(0, result.discovered - result.saved - result.skipped - result.failed);
       result.stopped = result.stopped || stopRequested;
       activeWorker = false;
       if (config.worker) await say('sourceWorkerCompleted', result);
@@ -295,7 +340,7 @@
     if (message?.type === NS + ':sourceRunFinished' || message?.type === NS + ':sourceRunPaused') {
       const payload = message.payload || {};
       setBusy(false);
-      status(payload.needsUserAction ? 'Action needed: ' + payload.needsUserAction.reason + ' (' + payload.needsUserAction.url + ')' : 'Batch finished.');
+      status(payload.needsUserAction ? 'Action needed: ' + payload.needsUserAction.reason + ' (' + payload.needsUserAction.url + ')' : payload.results?.myNotes?.error ? 'My Notes failed: ' + payload.results.myNotes.error : 'Batch finished.');
       updateResults({ sources: payload.results || {}, needsUserAction: payload.needsUserAction || null, folder: payload.folderName });
       return false;
     }

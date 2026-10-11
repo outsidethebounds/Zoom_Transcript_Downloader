@@ -9,7 +9,7 @@ const root={clientHeight:500,scrollHeight:1200,get scrollTop(){return top},set s
 function row(id,label){return {getAttribute:k=>k==='aria-label'?label:k==='data-ztd-note-id'?id:null,parentElement:root};}
 const listeners=[];
 const chrome={runtime:{sendMessage:async()=>({ok:true}),onMessage:{addListener:f=>listeners.push(f),removeListener:()=>{}}}};
-const doc={body:{},documentElement:root,scrollingElement:root,querySelector:s=>s.includes('data-row')?rows[0]||null:null,querySelectorAll:s=>s.includes('data-row')?rows:s.includes('button')?buttons:[],getElementById:id=>id==='export-help'?{textContent:'Download transcript'}:null};
+const doc={body:{},documentElement:root,scrollingElement:root,querySelector:s=>s.includes('data-row')?rows[0]||null:null,querySelectorAll:s=>s.includes('data-row')?rows:s.includes('button')?buttons:s.includes('tooltip')?[{textContent:'Download transcript'}]:[],getElementById:id=>id==='export-help'?{textContent:'Download transcript'}:null};
 const ctx=vm.createContext({globalThis:null,chrome,document:doc,location:{pathname:'/allNotes',origin:'https://us01mynotes.zoom.us'},window:{addEventListener(){},postMessage(){}},getComputedStyle:()=>({overflowY:'auto'}),setTimeout:f=>{queueMicrotask(f);return 1},clearTimeout(){},PointerEvent:class{},MouseEvent:class{},Event:class{},history:{back(){}},ZTDSources:sources,console});ctx.globalThis=ctx;vm.runInContext(source,ctx);
 rows=[row('one','Note one 2026-10-11 10:00')];
 assert.equal((await ctx.testAdapter.collectNotes(false)).length,1,'page scope only current list');
@@ -17,6 +17,8 @@ assert.equal((await ctx.testAdapter.collectNotes(true)).length,2,'incremental pa
 const exportButton={disabled:false,getBoundingClientRect:()=>({left:0,top:0,width:20,height:20}),getAttribute:k=>k==='aria-describedby'?'export-help':null,dispatchEvent(){},textContent:'',title:''};
 buttons=[{...exportButton,disabled:true},exportButton];assert.equal(await ctx.testAdapter.clickTranscriptDownload(),exportButton,'disabled permission control skipped');
 buttons=[{...exportButton,disabled:true}];assert.equal(await ctx.testAdapter.clickTranscriptDownload(),null);
+buttons=[{...exportButton,getAttribute:k=>k==='aria-describedby'?'unrelated-help':null}];
+assert.equal(await ctx.testAdapter.clickTranscriptDownload(),null,'another control’s tooltip must never identify this button as an export');
 ctx.location.pathname='/opaque-stable-ID';assert.equal(ctx.testAdapter.currentNoteId(),'opaque-stable-ID');
 ctx.location.pathname='/allNotes';assert.equal(ctx.testAdapter.currentNoteId(),'');
 console.log('notes-worker.test.mjs: all tests passed');
