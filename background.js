@@ -1,24 +1,53 @@
 import { createDownloadSuppression } from './lib/download-suppression.mjs';
+import { createSourcePlan, orderSources } from './lib/source-plan.mjs';
 
 const BASE_DEFAULTS = {
   filenamePattern: '{date} - {time} - {title}',
   downloadSubfolder: '',
   targetOs: 'macos',
   includeMeetingId: false,
+  sources: { recordings: true, myNotes: false },
 };
 
 const ACTIVE_HOST_RE = /^https:\/\/(?:[^/]+\.)?zoom\.us\/recording\/meeting\/transcript/i;
+const NOTES_LIST_RE = /^https:\/\/(?:[^/]+\.)?zoom\.us\/allNotes(?:[/?#]|$)/i;
 const CONTENT_SCRIPT_FILES = [
   'lib/core.js',
   'lib/page.js',
   'lib/runtime.js',
+  'lib/sources.js',
   'content.js',
 ];
+const NOTES_CONTENT_FILES = ['lib/sources.js', 'my-notes.js'];
 const CONTENT_SCRIPT_CSS_FILES = ['content.css'];
 const observedDownloads = [];
 let activeBatchFolderName = null;
 let activeBatchMode = 'legacy';
+let activeBatchTabId = null;
 const pendingExtensionOwnedFilenames = [];
+const expectedNotesExportsByTab = new Map();
+const notesDownloadsById = new Map();
+let claimedNotesDownloadId = null;
+const expectedRecordingUrls = new Set();
+const sourceRunsById = new Map();
+const sourceRunByOriginTab = new Map();
+const sourceRunByWorkerTab = new Map();
+let persistQueue = Promise.resolve();
+function persistRuns() {
+  const snapshots = [...sourceRunsById.values()].filter(r => !r.finished).map(r => ({ ...r, plan: r.plan.snapshot() }));
+  persistQueue = persistQueue.catch(() => {}).then(() => chrome.storage.session.set({ 'ztd:source-runs': snapshots }));
+  return persistQueue;
+}
+const recoveryReady = chrome.storage.session.get(null).then(stored => {
+  const batch = stored['ztd:recording-batch'];
+  if (batch) { activeBatchFolderName = batch.folder; activeBatchMode = batch.mode; activeBatchTabId = batch.tabId; }
+  for (const url of stored['ztd:recording-native-urls'] || []) expectedRecordingUrls.add(url);
+  for (const saved of stored['ztd:source-runs'] || []) {
+    const run = { ...saved, plan: createSourcePlan(saved.plan.selected, saved.plan) };
+    sourceRunsById.set(run.runId, run); sourceRunByOriginTab.set(run.originTabId, run);
+    if (run.workerTabId) sourceRunByWorkerTab.set(run.workerTabId, run);
+  }
+});
 const downloadSuppression = createDownloadSuppression(chrome, item => shouldSuppressNativeZoomDownload(item));
 
 async function inferDefaultOs() {
@@ -57,17 +86,19 @@ function isExtensionOwnedDownload(item) {
 }
 
 function shouldSuppressNativeZoomDownload(item) {
-  if (!['direct-save', 'direct-save-current-page'].includes(activeBatchMode)) return false;
-  if (isExtensionOwnedDownload(item)) return false;
-  const haystack = [
-    item?.url || '',
-    item?.finalUrl || '',
-    item?.referrer || '',
-    item?.filename || '',
-    item?.mime || '',
-  ].join(' ');
-  return /zoom|blob:/i.test(haystack) && /transcript|download|plain|text|txt/i.test(haystack);
+  if (!['direct-save', 'direct-save-current-page'].includes(activeBatchMode) || item.byExtensionId) return false;
+  return expectedRecordingUrls.has(item.url) || expectedRecordingUrls.has(item.finalUrl);
 }
+// Chrome DownloadItem omits tabId. Wait for the originating worker's anchor
+// metadata, rather than canceling every Zoom transcript in another user tab.
+chrome.downloads.onCreated.addListener(item => {
+  if (item.byExtensionId || !['direct-save', 'direct-save-current-page'].includes(activeBatchMode)) return;
+  chrome.storage.session.get('ztd:recording-native-urls').then(stored => {
+    if ((stored['ztd:recording-native-urls'] || []).includes(item.url)) expectedRecordingUrls.add(item.url);
+    if (shouldSuppressNativeZoomDownload(item)) downloadSuppression.onCreated(item);
+    else setTimeout(() => { if (shouldSuppressNativeZoomDownload(item)) downloadSuppression.onCreated(item); }, 150);
+  }).catch(() => {});
+});
 
 function recordDownload(item) {
   observedDownloads.push({
@@ -87,6 +118,20 @@ chrome.downloads.onCreated.addListener(item => {
 });
 
 chrome.downloads.onChanged.addListener(delta => {
+  if (delta.state?.current === 'complete' || delta.state?.current === 'interrupted') {
+    const notify = notesExport => {
+      if (!notesExport) return;
+      notesDownloadsById.delete(delta.id);
+      chrome.storage.session.remove('ztd:notes-download:' + delta.id).catch(() => {});
+      chrome.tabs.sendMessage(notesExport.tabId, {
+        type: 'zoomTranscriptExtension:myNotesExportFinished',
+        payload: { exportId: notesExport.exportId, ok: delta.state.current === 'complete', error: delta.error?.current || null, filename: notesExport.filename },
+      }).catch(() => {});
+    };
+    const notesExport = notesDownloadsById.get(delta.id);
+    if (notesExport) notify(notesExport);
+    else chrome.storage.session.get('ztd:notes-download:' + delta.id).then(stored => notify(stored['ztd:notes-download:' + delta.id])).catch(() => {});
+  }
   const found = observedDownloads.find(d => d.id === delta.id);
   if (found) {
     if (delta.filename?.current) {
@@ -98,35 +143,57 @@ chrome.downloads.onChanged.addListener(delta => {
   downloadSuppression.onChanged(delta);
 });
 
-chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+function noteExportKey(tabId) { return 'ztd:notes-export:' + tabId; }
+function matchesNotesExport(item, expected) {
+  if (!expected || expected.expiresAt <= Date.now()) return false;
+  try { return new URL(item.finalUrl || item.url).hostname === 'file-paa.zoom.us' && !!expected.url && (item.url === expected.url || item.finalUrl === expected.url) && !item.byExtensionId; } catch { return false; }
+}
+function chooseNotesExport(item, expected, suggest) {
+  const filename = expected.folderPath + '/' + expected.filename;
+  const tracked = { ...expected, filename, tabId: expected.tabId };
+  claimedNotesDownloadId = item.id;
+  notesDownloadsById.set(item.id, tracked);
+  expectedNotesExportsByTab.delete(expected.tabId);
+  chrome.storage.session.set({ ['ztd:notes-download:' + item.id]: tracked })
+    .then(() => chrome.storage.session.remove(noteExportKey(expected.tabId)))
+    .then(() => suggest({ filename, conflictAction: 'uniquify' }))
+    .catch(() => suggest({ filename, conflictAction: 'uniquify' }));
+}
+function chooseFallbackFilename(item, suggest) {
   if (isExtensionOwnedDownload(item)) {
     const hintedFilename = pendingExtensionOwnedFilenames.shift();
-    if (hintedFilename) {
-      suggest({
-        filename: hintedFilename,
-        conflictAction: 'uniquify',
-      });
-      return;
+    if (hintedFilename) { suggest({ filename: hintedFilename, conflictAction: 'uniquify' }); return; }
+  }
+  if (item.tabId !== activeBatchTabId || !activeBatchFolderName || !looksLikeZoomTranscriptDownload(item)) { suggest(); return; }
+  suggest({ filename: getBatchDownloadPath(item.filename || item.finalUrl || item.url || ''), conflictAction: 'uniquify' });
+}
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  (async () => {
+    // Wait briefly for export-response metadata to reach the isolated worker.
+    // An exact URL match avoids routing an unrelated manual download.
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const stored = await chrome.storage.session.get(null);
+      const pending = Object.entries(stored).filter(([key]) => key.startsWith('ztd:notes-export:')).map(([,value]) => value).find(e => matchesNotesExport(item, e));
+      if (pending && claimedNotesDownloadId !== item.id) { chooseNotesExport(item, pending, suggest); return; }
+      if (!Object.keys(stored).some(k => k.startsWith('ztd:notes-export:')) || !/^https:\/\/file-paa\.zoom\.us\//i.test(item.url || '')) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
-  }
-  if (!activeBatchFolderName || !looksLikeZoomTranscriptDownload(item)) {
-    suggest();
-    return;
-  }
-  suggest({
-    filename: getBatchDownloadPath(item.filename || item.finalUrl || item.url || ''),
-    conflictAction: 'uniquify',
-  });
+    chooseFallbackFilename(item, suggest);
+  })().catch(() => chooseFallbackFilename(item, suggest));
+  return true;
 });
 
 async function setActionForTab(tabId, url) {
-  const active = typeof url === 'string' && ACTIVE_HOST_RE.test(url);
+  const active = typeof url === 'string' && (ACTIVE_HOST_RE.test(url) || NOTES_LIST_RE.test(url));
   await chrome.action.setBadgeText({ tabId, text: active ? 'ON' : '' }).catch(() => {});
   await chrome.action.setBadgeBackgroundColor({ tabId, color: active ? '#2563eb' : '#6b7280' }).catch(() => {});
 }
 
 function isTranscriptPageUrl(url) {
   return typeof url === 'string' && ACTIVE_HOST_RE.test(url);
+}
+function isNotesListUrl(url) {
+  return typeof url === 'string' && NOTES_LIST_RE.test(url);
 }
 
 async function pingContentScript(tabId) {
@@ -139,18 +206,169 @@ async function pingContentScript(tabId) {
 }
 
 async function ensureExtensionUi(tabId, url) {
-  if (!isTranscriptPageUrl(url)) return false;
+  const notesPage = typeof url === 'string' && NOTES_LIST_RE.test(url);
+  if (!notesPage && !isTranscriptPageUrl(url)) return false;
   if (await pingContentScript(tabId)) return true;
-  await chrome.scripting.insertCSS({
-    target: { tabId },
-    files: CONTENT_SCRIPT_CSS_FILES,
-  }).catch(() => {});
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: CONTENT_SCRIPT_FILES,
-  });
+  await chrome.scripting.insertCSS({ target: { tabId }, files: CONTENT_SCRIPT_CSS_FILES }).catch(() => {});
+  await chrome.scripting.executeScript({ target: { tabId }, files: notesPage ? NOTES_CONTENT_FILES : CONTENT_SCRIPT_FILES });
   return await pingContentScript(tabId);
 }
+
+function sanitizeSubfolder(path = '') {
+  return String(path).split(/[\\/]+/).map(part => part.trim()).filter(part => part && part !== '.' && part !== '..').map(part => part.replace(/[<>:"\\|?*\x00-\x1F]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[ .]+$/g, '')).filter(Boolean).join('/');
+}
+function datedBatchFolder(subfolder = '') {
+  const d = new Date();
+  const name = 'ZoomTranscripts-' + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + d.getFullYear();
+  const prefix = sanitizeSubfolder(subfolder);
+  return prefix ? prefix + '/' + name : name;
+}
+function sourceFolderPath(root, source) {
+  return root + '/' + (source === 'recordings' ? 'Recordings' : 'My Notes');
+}
+function sourceRunNotice(run, type, payload = {}) {
+  if (typeof run.originTabId !== 'number') return;
+  chrome.tabs.sendMessage(run.originTabId, { type: 'zoomTranscriptExtension:' + type, payload: { runId: run.runId, ...payload } }).catch(() => {});
+}
+async function finishSourceRun(run, extra = {}) {
+  if (run.finished) return;
+  run.finished = true;
+  if (run.workerTabId) sourceRunByWorkerTab.delete(run.workerTabId);
+  if (run.workerTabId && !extra.keepWorker) await chrome.tabs.remove(run.workerTabId).catch(() => {});
+  sourceRunByOriginTab.delete(run.originTabId);
+  sourceRunsById.delete(run.runId);
+  await persistRuns();
+  sourceRunNotice(run, 'sourceRunFinished', { results: run.results, folderName: run.rootFolder, ...extra });
+}
+async function startNextSource(run) {
+  if (run.finished) return;
+  if (run.plan.stopped || run.stopRequested) { await finishSourceRun(run, { stopped: true }); return; }
+  const source = run.plan.next();
+  if (!source) { await finishSourceRun(run); return; }
+  run.currentSource = source;
+  run.workerStarted = false;
+  await persistRuns();
+  const targetUrl = source === 'recordings' ? run.recordingUrl : run.notesUrl;
+  if (!targetUrl) {
+    await finishSourceRun(run, { needsUserAction: { url: run.originUrl, reason: source === 'recordings' ? 'Open the Zoom recording-transcripts list in this signed-in profile once, then start the selected-sources batch again.' : 'Open My Notes > All notes in this signed-in profile and retry.' } });
+    return;
+  }
+  sourceRunNotice(run, 'sourceRunProgress', { source, state: 'starting', message: 'Opening the ' + (source === 'recordings' ? 'recordings' : 'My Notes') + ' worker tab.' });
+  try {
+    const tab = await chrome.tabs.create({ url: targetUrl, active: false, openerTabId: run.originTabId });
+    run.workerTabId = tab.id;
+    sourceRunByWorkerTab.set(tab.id, run);
+    await persistRuns();
+    const currentTab = await chrome.tabs.get(tab.id).catch(() => tab);
+    if (currentTab.status === 'complete') await startSourceWorkerInTab(run, tab.id, currentTab.url || tab.url || targetUrl);
+  } catch (error) {
+    run.plan.complete(source, { saved: 0, skipped: 0, failed: 1, error: String(error) });
+    run.results = run.plan.results;
+    await startNextSource(run);
+  }
+}
+async function startSourceWorkerInTab(run, tabId, url) {
+  if (run.finished || run.workerTabId !== tabId || run.workerStarted) return;
+  run.workerStarted = true;
+  await persistRuns();
+  try {
+    if (/\/(?:login|signin|sign-in|sso)(?:[/?#]|$)/i.test(url)) {
+      await handleSourceWorkerResult(tabId, { runId: run.runId, source: run.currentSource, saved: 0, skipped: 0, failed: 0, needsUserAction: { url: String(url).split(/[?#]/)[0], reason: 'Zoom sign-in is required in the dedicated worker tab.' } });
+      return;
+    }
+    if ((run.currentSource === 'recordings' && !isTranscriptPageUrl(url)) || (run.currentSource === 'myNotes' && !isNotesListUrl(url))) {
+      await handleSourceWorkerResult(tabId, { runId: run.runId, source: run.currentSource, saved: 0, skipped: 0, failed: 0, needsUserAction: { url: String(url).split(/[?#]/)[0], reason: 'Open the signed-in Zoom source list in this worker tab, then retry.' } }); return;
+    }
+    await ensureExtensionUi(tabId, url);
+    const source = run.currentSource;
+    const folderName = sourceFolderPath(run.rootFolder, source);
+    const message = source === 'recordings'
+      ? { type: 'zoomTranscriptExtension:workerStartRecordings', payload: { runId: run.runId, mode: run.mode, folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope } }
+      : { type: 'zoomTranscriptExtension:workerStartMyNotes', payload: { runId: run.runId, mode: run.mode, folderName, folderPath: folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope } };
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch (error) {
+    run.plan.complete(run.currentSource, { saved: 0, skipped: 0, failed: 1, error: 'Could not start the source worker: ' + String(error) });
+    run.results = run.plan.results;
+    sourceRunByWorkerTab.delete(tabId);
+    await chrome.tabs.remove(tabId).catch(() => {});
+    run.workerTabId = null;
+    await startNextSource(run);
+  }
+}
+async function beginSourceRun(payload, sender, sendResponse) {
+  await recoveryReady;
+  const originTabId = sender?.tab?.id;
+  if (typeof originTabId !== 'number') { sendResponse({ ok: false, error: 'The source run must start from a Zoom tab.' }); return; }
+  const selected = orderSources(payload?.selected);
+  if (!selected.length) { sendResponse({ ok: false, error: 'Select at least one transcript source.' }); return; }
+  if (sourceRunsById.size) { sendResponse({ ok: false, error: 'A source batch is already running in this tab.' }); return; }
+  const originUrl = String(payload.originUrl || sender.tab.url || '').split('#')[0];
+  let recordingUrl = isTranscriptPageUrl(originUrl) ? originUrl : '';
+  let notesUrl = isNotesListUrl(originUrl) ? originUrl : '';
+  const stored = await chrome.storage.local.get({ recordingListUrl: '', notesListUrl: '' });
+  recordingUrl ||= isTranscriptPageUrl(stored.recordingListUrl) ? stored.recordingListUrl : '';
+  if (!recordingUrl) { const tabs = await chrome.tabs.query({}); recordingUrl = tabs.find(t => isTranscriptPageUrl(t.url))?.url || 'https://app.zoom.us/recording/meeting/transcript'; }
+  notesUrl ||= isNotesListUrl(stored.notesListUrl) ? stored.notesListUrl : 'https://us01mynotes.zoom.us/allNotes';
+  if (payload.currentSource === 'myNotes' && isNotesListUrl(originUrl)) notesUrl = originUrl;
+  if (payload.currentSource === 'recordings' && isTranscriptPageUrl(originUrl)) recordingUrl = originUrl;
+  const runId = 'sources-' + Date.now() + '-' + originTabId;
+  const run = { runId, originTabId, originUrl, rootFolder: datedBatchFolder(payload.settings?.downloadSubfolder), settings: payload.settings || {}, mode: payload.mode === 'page' ? 'page' : 'all', plan: createSourcePlan(selected), results: {}, scope: payload.scope || null, testLimit: Number.isInteger(payload.testLimit) ? Math.max(1, Math.min(payload.testLimit, 3)) : null, stopRequested: false, finished: false, workerTabId: null, workerStarted: false, recordingUrl, notesUrl };
+  sourceRunsById.set(runId, run);
+  sourceRunByOriginTab.set(originTabId, run);
+  await persistRuns();
+  sendResponse({ ok: true, runId, folderName: run.rootFolder });
+  await startNextSource(run);
+}
+async function stopSourceRun(originTabId) {
+  await recoveryReady;
+  const run = sourceRunByOriginTab.get(originTabId);
+  if (!run) return;
+  run.stopRequested = true;
+  run.plan.stop();
+  await persistRuns();
+  if (run.workerTabId) chrome.tabs.sendMessage(run.workerTabId, { type: 'zoomTranscriptExtension:stopSourceWorker' }).catch(() => {});
+  else await finishSourceRun(run, { stopped: true });
+}
+async function handleSourceWorkerResult(tabId, result) {
+  await recoveryReady;
+  const run = sourceRunByWorkerTab.get(tabId);
+  if (!run || run.finished || result?.runId !== run.runId || result?.source !== run.currentSource) return;
+  run.plan.complete(run.currentSource, result || {});
+  run.results = run.plan.results;
+  sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, result: run.results[run.currentSource], state: 'complete' });
+  const userAction = result?.needsUserAction;
+  if (userAction) {
+    run.finished = true;
+    sourceRunByOriginTab.delete(run.originTabId);
+    sourceRunsById.delete(run.runId);
+    sourceRunByWorkerTab.delete(tabId);
+    await persistRuns();
+    sourceRunNotice(run, 'sourceRunPaused', { results: run.results, folderName: run.rootFolder, needsUserAction: userAction, workerTabId: tabId });
+    await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+    return;
+  }
+  sourceRunByWorkerTab.delete(tabId);
+  await chrome.tabs.remove(tabId).catch(() => {});
+  run.workerTabId = null;
+  run.workerStarted = false;
+  await startNextSource(run);
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete') {
+    const url = String(tab.url || changeInfo.url || '').split(/[?#]/)[0];
+    if (isTranscriptPageUrl(url)) chrome.storage.local.set({ recordingListUrl: url }).catch(() => {});
+    if (isNotesListUrl(url)) chrome.storage.local.set({ notesListUrl: url }).catch(() => {});
+    recoveryReady.then(() => { const run = sourceRunByWorkerTab.get(tabId); if (run) startSourceWorkerInTab(run, tabId, url).catch(() => {}); });
+  }
+});
+
+chrome.tabs.onRemoved.addListener(tabId => { recoveryReady.then(async () => {
+  const workerRun = sourceRunByWorkerTab.get(tabId);
+  if (workerRun && !workerRun.finished) { sourceRunByWorkerTab.delete(tabId); workerRun.workerTabId = null; await finishSourceRun(workerRun, { stopped: true, error: 'Worker tab closed.' }); }
+  const originRun = sourceRunByOriginTab.get(tabId);
+  if (originRun) await stopSourceRun(tabId);
+}); });
 
 async function refreshAllTabs() {
   const tabs = await chrome.tabs.query({}).catch(() => []);
@@ -198,6 +416,24 @@ function makeDataUrl(content, mime = 'text/plain;charset=utf-8') {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'zoomTranscriptExtension:startSourceRun') {
+    beginSourceRun(message.payload || {}, _sender, sendResponse).catch(error => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:stopSourceRun') {
+    stopSourceRun(_sender?.tab?.id).then(() => sendResponse({ ok: true })).catch(error => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:sourceWorkerProgress') {
+    recoveryReady.then(() => { const run = sourceRunByWorkerTab.get(_sender?.tab?.id);
+    if (run && message.payload?.runId === run.runId) sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'running', message: message.payload?.message || 'Working' });
+    sendResponse({ ok: !!run }); });
+    return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:sourceWorkerCompleted') {
+    handleSourceWorkerResult(_sender?.tab?.id, message.payload || {}).then(() => sendResponse({ ok: true })).catch(error => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
   if (message?.type === 'zoomTranscriptExtension:getSettings') {
     inferDefaultOs().then(targetOs => chrome.storage.local.get({ ...BASE_DEFAULTS, targetOs }).then(sendResponse));
     return true;
@@ -206,15 +442,61 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     chrome.storage.local.set(message.settings || {}).then(() => sendResponse({ ok: true }));
     return true;
   }
+  if (message?.type === 'zoomTranscriptExtension:correlateMyNotesExport') {
+    const tabId = _sender?.tab?.id;
+    chrome.storage.session.get(noteExportKey(tabId)).then(async stored => {
+      const expected = stored[noteExportKey(tabId)];
+      const url = String(message.payload?.url || '');
+      if (expected?.exportId !== message.payload?.exportId || !/^https:\/\/file-paa\.zoom\.us\//i.test(url)) { sendResponse({ ok: false }); return; }
+      expected.url = url; expectedNotesExportsByTab.set(tabId, expected);
+      await chrome.storage.session.set({ [noteExportKey(tabId)]: expected }); sendResponse({ ok: true });
+    }).catch(() => sendResponse({ ok: false })); return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:clearMyNotesExport') {
+    const tabId = _sender?.tab?.id;
+    expectedNotesExportsByTab.delete(tabId);
+    chrome.storage.session.remove(noteExportKey(tabId)).then(() => sendResponse({ ok: true })); return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:expectMyNotesExport') {
+    const tabId = _sender?.tab?.id;
+    if (typeof tabId !== 'number' || !sourceRunByWorkerTab.has(tabId) || !message.payload?.filename || !message.payload?.folderPath) {
+      sendResponse({ ok: false, error: 'My Notes export requires a worker tab and final path.' });
+      return false;
+    }
+    const expected = {
+      exportId: String(message.payload.exportId || Date.now()),
+      filename: String(message.payload.filename).replace(/[\\/]/g, ' ').trim(),
+      folderPath: String(message.payload.folderPath).split(/[\\/]+/).filter(part => part && part !== '.' && part !== '..').join('/'),
+      expiresAt: Date.now() + 45000,
+      tabId,
+      origin: new URL(_sender.tab.url).origin,
+    };
+    expectedNotesExportsByTab.set(tabId, expected);
+    chrome.storage.session.set({ [noteExportKey(tabId)]: expected }).then(() => sendResponse({ ok: true })).catch(error => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:expectRecordingNative') {
+    const url = String(message.payload?.url || '');
+    if (_sender?.tab?.id !== activeBatchTabId || !/^(?:blob:|https:)/.test(url)) { sendResponse({ ok: false }); return false; }
+    expectedRecordingUrls.add(url);
+    chrome.storage.session.set({ 'ztd:recording-native-urls': [...expectedRecordingUrls] }).then(() => sendResponse({ ok: true })); return true;
+  }
   if (message?.type === 'zoomTranscriptExtension:startDownloadBatch') {
+    expectedRecordingUrls.clear();
+    chrome.storage.session.remove('ztd:recording-native-urls').catch(() => {});
     activeBatchFolderName = message.payload?.folderName || null;
     activeBatchMode = message.payload?.mode || 'legacy';
-    sendResponse({ ok: true, folderName: activeBatchFolderName, mode: activeBatchMode });
-    return false;
+    activeBatchTabId = _sender?.tab?.id ?? null;
+    chrome.storage.session.set({ 'ztd:recording-batch': { folder: activeBatchFolderName, mode: activeBatchMode, tabId: activeBatchTabId } }).then(() => sendResponse({ ok: true, folderName: activeBatchFolderName, mode: activeBatchMode }));
+    return true;
   }
   if (message?.type === 'zoomTranscriptExtension:finishDownloadBatch') {
+    expectedRecordingUrls.clear();
+    chrome.storage.session.remove('ztd:recording-native-urls').catch(() => {});
     activeBatchFolderName = null;
     activeBatchMode = 'legacy';
+    activeBatchTabId = null;
+    chrome.storage.session.remove('ztd:recording-batch').catch(() => {});
     pendingExtensionOwnedFilenames.length = 0;
     sendResponse({ ok: true });
     return false;
@@ -225,7 +507,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const downloadFilename = getBatchDownloadPath(filename || '');
     pendingExtensionOwnedFilenames.push(downloadFilename);
     chrome.downloads.download({ url, filename: downloadFilename, saveAs: false, conflictAction: 'uniquify' })
-      .then(downloadId => sendResponse({ ok: true, downloadId, filename: downloadFilename }))
+      .then(async downloadId => {
+        const deadline = Date.now() + 30000;
+        while (Date.now() < deadline) {
+          const [item] = await chrome.downloads.search({ id: downloadId });
+          if (item?.state === 'complete') { sendResponse({ ok: true, downloadId, filename: downloadFilename }); return; }
+          if (item?.state === 'interrupted') throw new Error('Transcript download interrupted.');
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        throw new Error('Transcript download did not complete within 30 seconds.');
+      })
       .catch(error => {
         pendingExtensionOwnedFilenames.pop();
         sendResponse({ ok: false, error: String(error), filename: downloadFilename });

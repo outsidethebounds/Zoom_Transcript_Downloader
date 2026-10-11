@@ -40,7 +40,31 @@
         "lib/core.js",
         "lib/page.js",
         "lib/runtime.js",
+        "lib/sources.js",
         "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.zoom.us/allNotes*"
+      ],
+      "js": [
+        "my-notes-hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.zoom.us/allNotes*"
+      ],
+      "js": [
+        "lib/sources.js",
+        "my-notes.js"
       ],
       "css": [
         "content.css"

@@ -1,3 +1,6 @@
+(() => {
+if (globalThis.__ztdRecordingsLoaded) return;
+globalThis.__ztdRecordingsLoaded = true;
 const EXTENSION_NS = 'zoomTranscriptExtension';
 const PANEL_ID = 'ztd-panel';
 const LAUNCHER_ID = 'ztd-launcher';
@@ -29,6 +32,7 @@ const {
 } = globalThis.ZTDPage || {};
 
 const runtime = globalThis.ZTDRuntime?.createClient(EXTENSION_NS);
+const sourceApi = globalThis.ZTDSources;
 
 let lastRows = [];
 let logLines = [];
@@ -41,6 +45,8 @@ let stickyPanelMessage = null;
 let currentDownloadFolderName = null;
 let pendingTranscriptWaiters = [];
 let transcriptResponseQueue = [];
+let sourceWorkerRun = null;
+let sourceRunRequested = false;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -51,6 +57,19 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+async function startCoordinatedSourceRun(mode) {
+  const settings = await getSettings();
+  const selected = mode === 'page' ? ['recordings'] : sourceApi.orderedSources({ recordings: document.querySelector('#ztd-source-recordings')?.checked, myNotes: document.querySelector('#ztd-source-notes')?.checked });
+  if (!selected.length) { showToast('Select at least one source.', 'warn'); return; }
+  sourceRunRequested = true;
+  saveAllController = { running: true, stopRequested: false };
+  setSaveAllRunning(true);
+  const activity = document.querySelector('#ztd-activity-note');
+  if (activity) activity.textContent = 'Starting selected sources in an inactive worker tab.';
+  const response = await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:startSourceRun`, payload: { selected, settings, currentSource: 'recordings', mode, originUrl: location.href, scope: mode === 'page' ? { page: getPaginationState().currentPage, rowKeys: scanRows().map(row => row.key) } : null } });
+  if (!response?.ok) { sourceRunRequested = false; saveAllController.running = false; setSaveAllRunning(false); showToast(response?.error || 'Could not start the source batch.', 'error'); }
 }
 
 function showToast(message, kind = 'info', timeoutMs = 3500) {
@@ -203,6 +222,10 @@ function handleTranscriptResponseMessage(event) {
   if (event.source !== window) return;
   const data = event.data;
   if (!data || data.source !== 'zoom-transcript-extension') return;
+  if (data.type === 'native-download-url' && saveAllController.running && sourceWorkerRun) {
+    chrome.runtime.sendMessage({ type: EXTENSION_NS + ':expectRecordingNative', payload: { url: data.payload?.url } }).catch(() => {});
+    return;
+  }
   if (data.type === 'hook-debug') {
     if (pendingTranscriptWaiters.length) {
       log('Page hook observed network event', data.payload || {});
@@ -606,6 +629,7 @@ async function collectDownloadPlan(settings) {
       plannedEntries: plannedEntries.length,
     });
 
+    if (sourceWorkerRun?.testLimit && plannedEntries.length >= sourceWorkerRun.testLimit) break;
     const moved = await gotoNextPage();
     if (!moved.ok) break;
     await sleep(800);
@@ -654,7 +678,8 @@ async function saveTranscriptRow(item, plannedEntry) {
     savedDownloadId: saved?.downloadId || null,
   };
 
-  downloadManifest.push(entry);
+  if (saved?.ok) downloadManifest.push(entry);
+  if (sourceWorkerRun) chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:sourceWorkerProgress`, payload: { runId: sourceWorkerRun.runId, message: 'Saved ' + downloadManifest.length + ' recording transcript' + (downloadManifest.length === 1 ? '' : 's') + ' so far.' } }).catch(() => {});
   updatePanelSummary();
   log('Saved transcript with final filename', entry);
 
@@ -685,6 +710,7 @@ async function saveVisiblePage(settingsNow) {
 
   const results = [];
   for (let i = 0; i < rowsNow.length; i++) {
+    if (sourceWorkerRun?.testLimit && results.length >= sourceWorkerRun.testLimit) break;
     if (saveAllController.stopRequested) {
       return {
         ok: false,
@@ -702,7 +728,7 @@ async function saveVisiblePage(settingsNow) {
       title: rowsNow[i].meta?.title || '',
       targetFilename: plannedEntries[i]?.targetFilename || null,
     });
-    results.push(await saveTranscriptRow(rowsNow[i], plannedEntries[i]));
+    try { results.push(await saveTranscriptRow(rowsNow[i], plannedEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); }
     await sleep(SAVE_ALL_DELAY_MS);
   }
 
@@ -758,18 +784,23 @@ function renderPanel(rows, settings) {
           <div id="ztd-status-secondary" class="ztd-status-secondary">Waiting for transcript rows</div>
         </div>
       </div>
+      <div class="ztd-source-options">
+        <div class="ztd-section-label">Sources</div>
+        <label><input type="checkbox" id="ztd-source-recordings"> Recording transcripts</label>
+        <label><input type="checkbox" id="ztd-source-notes"> My Notes transcripts</label>
+      </div>
       <div class="ztd-controls">
         <div class="ztd-button-with-help">
           <button
             type="button"
             id="ztd-save-all"
             aria-describedby="ztd-save-all-tooltip"
-          >Save all</button>
+          >Save selected sources</button>
           <span class="ztd-inline-tooltip" id="ztd-save-all-tooltip" role="tooltip">
             Saves every available transcript across all pages, not just the page you are viewing now.
           </span>
         </div>
-        <button type="button" class="ztd-secondary-action" id="ztd-save-page" title="Save only the transcripts available on the current page">Save page</button>
+        <button type="button" class="ztd-secondary-action" id="ztd-save-page" title="Save only this source's visible list">Save this page</button>
         <button type="button" class="ztd-danger" id="ztd-stop-save-all">Stop</button>
       </div>
       <div class="ztd-meta-section">
@@ -812,10 +843,23 @@ function renderPanel(rows, settings) {
       event.currentTarget.setAttribute('aria-label', collapsed ? 'Expand panel' : 'Collapse panel');
     });
     panel.querySelector('#ztd-debug-toggle').addEventListener('change', applyDebugVisibility);
+    const sourceRecordings = panel.querySelector('#ztd-source-recordings');
+    const sourceNotes = panel.querySelector('#ztd-source-notes');
+    const storedSources = sourceApi?.normalizeSources(settings.sources);
+    sourceRecordings.checked = storedSources?.recordings ?? true;
+    sourceNotes.checked = storedSources?.myNotes ?? false;
+    const persistSources = async () => {
+      const sources = { recordings: sourceRecordings.checked, myNotes: sourceNotes.checked };
+      await setSettings({ sources });
+      currentSettings = { ...(currentSettings || {}), sources };
+    };
+    sourceRecordings.addEventListener('change', persistSources);
+    sourceNotes.addEventListener('change', persistSources);
 
     panel.querySelector('#ztd-save-all').addEventListener('click', async () => {
-      const settingsNow = await getSettings();
-      currentDownloadFolderName = buildDownloadFolderPath(settingsNow.downloadSubfolder);
+      if (!sourceWorkerRun) { await startCoordinatedSourceRun('all'); return; }
+      const settingsNow = sourceWorkerRun?.settings || await getSettings();
+      currentDownloadFolderName = sourceWorkerRun?.folderName || buildDownloadFolderPath(settingsNow.downloadSubfolder);
       stickyPanelMessage = {
         ok: true,
         message: 'Download job is running.',
@@ -823,10 +867,11 @@ function renderPanel(rows, settings) {
         folderName: currentDownloadFolderName
       };
       currentRunId = `run-${Date.now()}`;
+      window.postMessage({ source: 'ztd-recording-worker-control', active: true }, location.origin);
       await startDownloadBatch({ runId: currentRunId, folderName: currentDownloadFolderName, mode: 'direct-save' });
       downloadManifest = [];
       updatePanelSummary();
-      saveAllController = { running: true, stopRequested: false };
+      saveAllController = { running: true, stopRequested: sourceWorkerRun?.stopRequested === true };
       setSaveAllRunning(true);
       showToast(`Download job started. Files will be saved in Downloads/${currentDownloadFolderName}.`, 'info', 5000);
 
@@ -835,6 +880,7 @@ function renderPanel(rows, settings) {
       let pagesVisited = 0;
       let skippedUnavailable = 0;
       let savePageNumber = 1;
+      let workerError = null;
 
       try {
         debugCheckpoint('Resetting to page 1 before planning download', {
@@ -843,6 +889,7 @@ function renderPanel(rows, settings) {
         });
         const reset = await gotoFirstPage();
         if (!reset.ok) {
+          workerError = reset.error;
           debugCheckpoint('Reset to page 1 before planning failed', { error: reset.error });
           return;
         }
@@ -853,6 +900,7 @@ function renderPanel(rows, settings) {
         debugCheckpoint('Planning final filenames across all pages');
         const plan = await collectDownloadPlan(settingsNow);
         if (!plan.ok) {
+          workerError = plan.error;
           debugCheckpoint('Planning failed', plan);
           return;
         }
@@ -869,6 +917,7 @@ function renderPanel(rows, settings) {
         debugCheckpoint('Resetting to page 1 before save pass');
         const resetForSave = await gotoFirstPage();
         if (!resetForSave.ok) {
+          workerError = resetForSave.error;
           debugCheckpoint('Reset to page 1 before save pass failed', { error: resetForSave.error });
           return;
         }
@@ -924,6 +973,7 @@ function renderPanel(rows, settings) {
           });
 
           for (let i = 0; i < rowsNow.length; i++) {
+    if (sourceWorkerRun?.testLimit && results.length >= sourceWorkerRun.testLimit) break;
             if (saveAllController.stopRequested) {
               results.push({ stopped: true, page: savePageNumber, processed: downloadManifest.length, skippedUnavailable });
               setOutput(results);
@@ -936,10 +986,11 @@ function renderPanel(rows, settings) {
               title: rowsNow[i].meta?.title || '',
               targetFilename: pageEntries[i]?.targetFilename || null,
             });
-            results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i]));
+            try { results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); }
             await sleep(SAVE_ALL_DELAY_MS);
           }
 
+          if (sourceWorkerRun?.testLimit && results.length >= sourceWorkerRun.testLimit) break;
           const moved = await gotoNextPage();
           if (!moved.ok) break;
           savePageNumber += 1;
@@ -949,8 +1000,14 @@ function renderPanel(rows, settings) {
           await sleep(800);
         }
       } finally {
+        window.postMessage({ source: 'ztd-recording-worker-control', active: false }, location.origin);
         flushPendingTranscriptWaiters(new Error('Download batch finished before transcript capture completed.'));
         await finishDownloadBatch({ runId: currentRunId }).catch(() => {});
+        if (sourceWorkerRun) {
+          const failed = results.filter(result => result && result.ok === false).length;
+          await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:sourceWorkerCompleted`, payload: { runId: sourceWorkerRun.runId, source: 'recordings', saved: results.filter(result => result?.ok).length, skipped: skippedUnavailable, failed: failed + (workerError && !saveAllController.stopRequested ? 1 : 0), error: workerError, stopped: saveAllController.stopRequested } }).catch(() => {});
+          sourceWorkerRun = null;
+        }
         saveAllController.running = false;
         setSaveAllRunning(false);
       }
@@ -969,9 +1026,10 @@ function renderPanel(rows, settings) {
     });
 
     panel.querySelector('#ztd-save-page').addEventListener('click', async () => {
-      const settingsNow = await getSettings();
+      if (!sourceWorkerRun) { await startCoordinatedSourceRun('page'); return; }
+      const settingsNow = sourceWorkerRun?.settings || await getSettings();
       const pagination = getPaginationState();
-      currentDownloadFolderName = buildDownloadFolderPath(settingsNow.downloadSubfolder);
+      currentDownloadFolderName = sourceWorkerRun?.folderName || buildDownloadFolderPath(settingsNow.downloadSubfolder);
       stickyPanelMessage = {
         ok: true,
         message: `Saving transcripts from page ${pagination.currentPage}.`,
@@ -979,15 +1037,21 @@ function renderPanel(rows, settings) {
         folderName: currentDownloadFolderName
       };
       currentRunId = `run-${Date.now()}`;
+      window.postMessage({ source: 'ztd-recording-worker-control', active: true }, location.origin);
       await startDownloadBatch({ runId: currentRunId, folderName: currentDownloadFolderName, mode: 'direct-save-current-page' });
       downloadManifest = [];
       updatePanelSummary();
-      saveAllController = { running: true, stopRequested: false };
+      saveAllController = { running: true, stopRequested: sourceWorkerRun?.stopRequested === true };
       setSaveAllRunning(true);
       showToast(`Current-page save started. Files will be saved in Downloads/${currentDownloadFolderName}.`, 'info', 5000);
 
+      let result;
       try {
-        const result = await saveVisiblePage(settingsNow);
+        if (sourceWorkerRun?.scope?.page > 1) {
+          for (let p = 1; p < sourceWorkerRun.scope.page; p++) { const moved = await gotoNextPage(); if (!moved.ok) throw new Error('Could not restore the originating page.'); await sleep(800); }
+        }
+        if (sourceWorkerRun?.scope?.rowKeys && JSON.stringify(scanRows().map(r => r.key)) !== JSON.stringify(sourceWorkerRun.scope.rowKeys)) throw new Error('The worker list no longer matches the originating visible page.');
+        result = await saveVisiblePage(settingsNow);
         if (!result.ok) {
           debugCheckpoint('Current-page save failed', result);
           return;
@@ -1003,14 +1067,27 @@ function renderPanel(rows, settings) {
         }, null, 2);
         showToast(`Current page finished. Saved ${downloadManifest.length} transcript${downloadManifest.length === 1 ? '' : 's'}.`, 'success', 5000);
       } finally {
+        window.postMessage({ source: 'ztd-recording-worker-control', active: false }, location.origin);
         flushPendingTranscriptWaiters(new Error('Current-page save finished before transcript capture completed.'));
         await finishDownloadBatch({ runId: currentRunId }).catch(() => {});
+        if (sourceWorkerRun) {
+          const failed = (result?.results || []).filter(item => item && item.ok === false).length;
+          await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:sourceWorkerCompleted`, payload: { runId: sourceWorkerRun.runId, source: 'recordings', saved: (result?.results || []).filter(item => item?.ok).length, skipped: result?.skippedUnavailable || 0, failed: failed || (!result?.ok && !saveAllController.stopRequested ? 1 : 0), stopped: saveAllController.stopRequested } }).catch(() => {});
+          sourceWorkerRun = null;
+        }
         saveAllController.running = false;
         setSaveAllRunning(false);
       }
     });
 
     panel.querySelector('#ztd-stop-save-all').addEventListener('click', () => {
+      if (sourceRunRequested) {
+        chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:stopSourceRun` }).catch(() => {});
+        stickyPanelMessage = 'Stop requested. The current export will finish before the batch stops.';
+        panel.querySelector('#ztd-activity-note').textContent = stickyPanelMessage;
+        panel.querySelector('#ztd-output').textContent = stickyPanelMessage;
+        return;
+      }
       if (saveAllController.running) {
         saveAllController.stopRequested = true;
         stickyPanelMessage = 'Stop requested. Will halt after the current transcript finishes saving.';
@@ -1054,6 +1131,43 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+  if (message?.type === 'zoomTranscriptExtension:workerStartRecordings') {
+    sourceWorkerRun = message.payload || {};
+    currentRunId = sourceWorkerRun.runId || ('worker-' + Date.now());
+    sendResponse({ ok: true });
+    (async () => {
+      const deadline = Date.now() + 30000;
+      while (Date.now() < deadline && !scanRows().length && !saveAllController.stopRequested) await sleep(200);
+      await boot(true);
+      const selector = sourceWorkerRun.mode === 'page' ? '#ztd-save-page' : '#ztd-save-all';
+      document.querySelector(selector)?.click();
+    })().catch(() => {});
+    return false;
+  }
+  if (message?.type === 'zoomTranscriptExtension:stopSourceWorker') {
+    saveAllController.stopRequested = true;
+    if (sourceWorkerRun) sourceWorkerRun.stopRequested = true;
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message?.type === 'zoomTranscriptExtension:sourceRunProgress') {
+    const activity = document.querySelector('#ztd-activity-note');
+    if (activity) activity.textContent = (message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes transcripts: ') + (message.payload?.message || message.payload?.state || 'Working');
+    return false;
+  }
+  if (message?.type === 'zoomTranscriptExtension:sourceRunFinished' || message?.type === 'zoomTranscriptExtension:sourceRunPaused') {
+    sourceRunRequested = false;
+    saveAllController.running = false;
+    setSaveAllRunning(false);
+    const payload = message.payload || {};
+    const summary = { folder: payload.folderName, sources: payload.results, needsUserAction: payload.needsUserAction || null };
+    const activity = document.querySelector('#ztd-activity-note');
+    if (activity) activity.textContent = payload.needsUserAction ? 'Action needed: ' + payload.needsUserAction.reason + ' (' + payload.needsUserAction.url + ')' : 'Source batch finished. See per-source saved / skipped / failed counts below.';
+    setOutput(summary);
+    if (payload.needsUserAction) showToast('Action needed in the dedicated Zoom worker tab.', 'warn', 8000);
+    else showToast('Selected source batch finished.', 'success', 5000);
+    return false;
+  }
   if (message?.type === 'zoomTranscriptExtension:openPanel') {
     boot(true).then(() => sendResponse({ ok: true })).catch(error => sendResponse({ ok: false, error: String(error) }));
     return true;
@@ -1069,3 +1183,5 @@ const observer = new MutationObserver(() => {
 observer.observe(document.documentElement, { childList: true, subtree: true });
 
 boot().catch(error => log('Initial boot failed', String(error)));
+
+})();

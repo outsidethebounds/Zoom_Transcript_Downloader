@@ -12,6 +12,19 @@
     } catch {}
   };
 
+  let directSaveWorker = false;
+  window.addEventListener('message', event => {
+    if (event.source === window && event.data?.source === 'ztd-recording-worker-control') directSaveWorker = event.data.active === true;
+  });
+  const originalAnchorClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function (...args) {
+    if (directSaveWorker && /^(?:blob:https:\/\/(?:[^/]+\.)?zoom\.us\/|https:\/\/(?:[^/]+\.)?zoom\.us\/)/i.test(this.href)) {
+      postEvent('native-download-url', { url: this.href });
+      return; // captured text is saved once by the extension; no native prompt
+    }
+    return originalAnchorClick.apply(this, args);
+  };
+
   const looksInteresting = (url, contentType = '') => {
     const haystack = `${url || ''} ${contentType || ''}`.toLowerCase();
     return /transcript|download|caption|recording|meeting|plain|text|json|vtt|txt/.test(haystack);

@@ -14,6 +14,40 @@
   padding: 16px;
   font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
+#ztd-panel .ztd-source-options,
+#ztd-notes-panel .ztd-source-options {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  margin: 0 0 12px;
+  border: 1px solid #d8e1ec;
+  border-radius: 12px;
+  background: #fff;
+}
+#ztd-panel .ztd-source-options label,
+#ztd-notes-panel .ztd-source-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #334155;
+}
+#ztd-panel .ztd-source-options input,
+#ztd-notes-panel .ztd-source-options input { accent-color: #2563eb; }
+#ztd-notes-panel {
+  position: fixed; top: 16px; right: 16px; width: 360px; max-height: 78vh; overflow: auto;
+  z-index: 2147483647; box-sizing: border-box; padding: 16px; border: 1px solid #d8e1ec;
+  border-radius: 18px; background: #f8fafc; color: #0f172a; box-shadow: 0 18px 48px rgba(15, 23, 42, .18);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+#ztd-notes-panel > strong { display: block; margin-bottom: 12px; font-size: 18px; }
+#ztd-notes-panel .ztd-source-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+#ztd-notes-panel button { padding: 9px 11px; border: 0; border-radius: 10px; background: #2563eb; color: #fff; font-weight: 600; cursor: pointer; }
+#ztd-notes-panel #ztd-notes-page { background: #fff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+#ztd-notes-panel #ztd-notes-stop { background: #fff; color: #dc2626; border: 1px solid #fca5a5; }
+#ztd-notes-panel #ztd-notes-status { margin: 8px 0; color: #475569; }
+#ztd-notes-panel pre { max-height: 200px; overflow: auto; white-space: pre-wrap; border: 1px solid #d8e1ec; border-radius: 10px; padding: 8px; background: white; color: #334155; }
+
 #ztd-launcher {
   position: fixed;
   top: 16px;

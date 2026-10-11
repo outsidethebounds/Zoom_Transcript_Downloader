@@ -136,3 +136,11 @@ Core APIs used:
 - Pagination remains the highest runtime risk.
 - `page-hook.js` is now part of the critical path.
 - Legacy popup-era and helper-era files have been removed so the repo matches the current shipped architecture.
+
+## Selected-source coordinator and My Notes
+
+background.js serializes one selected-source run per browser profile, recordings then notes, with origin/worker/run correlation. Run plans, active recording-batch routing, and pending native note export metadata use chrome.storage.session to survive MV3 suspension. Workers are not restarted by SPA/detail navigation. Closing a worker ends the run; login pauses with Action needed rather than silently continuing.
+
+my-notes.js incrementally scrolls All notes and invokes its existing onLoadMore UI callback at the bottom, deduplicates stable opaque IDs, verifies detail IDs and enabled export controls, plans collision-safe names, then exports sequentially. my-notes-hook.js is a MAIN-world metadata-only bridge: it annotates row IDs and captures the native export anchor URL. It never reads transcript content. Filename routing matches that exact pending export URL once, then waits for terminal completion. No note transcript is fetched or saved a second time. Missing permissions are skipped; export timeout aborts the source to prevent late-file miscorrelation.
+
+Recording workers retain response capture and direct final-name saves. During direct save, the worker page hook prevents its native Zoom anchor download, avoiding duplicates/prompts without canceling unrelated manual downloads in another tab. Background suppression remains an exact-URL fallback; Chrome DownloadItem does not include tabId.

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createDownloadSuppression } from '../lib/download-suppression.mjs';
+import { createDownloadSuppression, shouldSuppressNativeTranscriptDownload } from '../lib/download-suppression.mjs';
 
 function event() {
   const listeners = [];
@@ -15,12 +15,12 @@ function fixture() {
     erase: async query => { calls.erase.push(query.id); },
   } };
   let mode = 'legacy';
-  const tracker = createDownloadSuppression(chrome, item =>
-    ['direct-save', 'direct-save-current-page'].includes(mode) && !item.extensionOwned && /zoom|blob:/i.test(`${item.url} ${item.filename}`) && /transcript|download|txt/i.test(`${item.url} ${item.filename}`));
-  return { calls, tracker, setMode(value) { mode = value; }, created(item) { chrome.downloads.onCreated.emit(item); }, changed(id, state) { chrome.downloads.onChanged.emit({ id, state: { current: state } }); } };
+  let workerTabId = 123;
+  const tracker = createDownloadSuppression(chrome, item => shouldSuppressNativeTranscriptDownload(item, mode, workerTabId));
+  return { calls, tracker, setMode(value, tabId = 123) { mode = value; workerTabId = tabId; }, created(item) { chrome.downloads.onCreated.emit(item); }, changed(id, state) { chrome.downloads.onChanged.emit({ id, state: { current: state } }); } };
 }
 
-const native = id => ({ id, url: 'https://zoom.us/recording/transcript/download', filename: 'transcript.txt', state: 'in_progress' });
+const native = id => ({ id, tabId: 123, url: 'https://zoom.us/recording/transcript/download', filename: 'transcript.txt', state: 'in_progress' });
 for (const mode of ['direct-save', 'direct-save-current-page']) {
   const f = fixture(); f.setMode(mode); f.created(native(mode));
   assert.deepEqual(f.calls.cancel, [mode], `${mode} suppresses native Zoom download`);
@@ -39,6 +39,8 @@ for (const mode of ['direct-save', 'direct-save-current-page']) {
   f.created({ ...native(11), extensionOwned: true, url: 'data:text/plain;base64,abc' });
   f.setMode('legacy');
   f.created(native(12)); // manual download outside a run is untouched
+  f.setMode('direct-save', 123);
+  f.created({ ...native(13), tabId: 999 }); // unrelated user tabs are never suppressed
   assert.deepEqual(f.calls.cancel, []); assert.equal(f.tracker.size, 0);
 }
 
@@ -77,6 +79,13 @@ for (const mode of ['direct-save', 'direct-save-current-page']) {
   onCreated.emit({ id: 50, state: 'in_progress' });
   onChanged.emit({ id: 50, state: { current: 'interrupted' } });
   assert.equal(tracker.size, 0); // failures never break lifecycle cleanup
+}
+
+{
+  assert.equal(shouldSuppressNativeTranscriptDownload(native(90), 'direct-save', 123), true);
+  assert.equal(shouldSuppressNativeTranscriptDownload({ ...native(91), tabId: 999 }, 'direct-save', 123), false);
+  assert.equal(shouldSuppressNativeTranscriptDownload(native(92), 'my-notes-native', 123), false);
+  assert.equal(shouldSuppressNativeTranscriptDownload({ ...native(93), url: 'data:text/plain;base64,abc' }, 'direct-save', 123), false);
 }
 
 console.log('download-suppression.test.mjs: all tests passed');
