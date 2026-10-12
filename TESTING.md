@@ -40,4 +40,14 @@ Do not perform live scans, sign-ins, or downloads as routine unit-test validatio
 - Run the syntax and Node test commands above.
 - Verify relative links and referenced repository files exist.
 - Search documentation for stale workflow labels, version labels, unverified company defaults, live asset counts, and claims of fresh login/export acceptance.
-- Keep PDFs/screenshots clearly marked legacy unless regenerated from current sources and verified. See README and USER_GUIDE.md.
+- Printable PDFs are generated from `guide/QUICK_START.html` and `guide/USER_GUIDE.html` with an installed Chrome/Edge headless browser. On macOS with Edge installed, run from the repository root (uses a temporary isolated profile; do not use a normal or dedicated Zoom profile):
+
+  ```sh
+  EDGE="/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+  PROFILE="$(mktemp -d /tmp/zoom-guide-edge-profile.XXXXXX)"
+  trap 'rm -rf "$PROFILE"' EXIT
+  "$EDGE" --headless --disable-gpu --disable-extensions --disable-sync --disable-background-networking --no-first-run --no-default-browser-check --user-data-dir="$PROFILE" --no-pdf-header-footer --print-to-pdf="$PWD/guide/Zoom-Transcript-Downloader-Quick-Start.pdf" "file://$PWD/guide/QUICK_START.html"
+  "$EDGE" --headless --disable-gpu --disable-extensions --disable-sync --disable-background-networking --no-first-run --no-default-browser-check --user-data-dir="$PROFILE" --no-pdf-header-footer --print-to-pdf="$PWD/guide/Zoom-Transcript-Downloader-User-Guide.pdf" "file://$PWD/guide/USER_GUIDE.html"
+  ```
+
+  Then inspect both PDFs for current scan/review/explicit-download, two-source, and privacy language; check page count/text and visual layout before removing legacy labels. The PDFs are local HTML prints only—do not load Zoom pages or export real data for this task. Keep older screenshots marked as historical if they show the former recordings-only panel.

@@ -24,13 +24,13 @@ Chrome Web Store direct listing: https://chrome.google.com/webstore/detail/lbmej
 
 - [Current user guide](./USER_GUIDE.md)
 - [Quick Start HTML](./guide/QUICK_START.html)
-- [Legacy printable quick-start PDF](./guide/Zoom-Transcript-Downloader-Quick-Start.pdf)
-- [Legacy printable user-guide PDF](./guide/Zoom-Transcript-Downloader-User-Guide.pdf)
+- [Printable quick-start guide (PDF)](./guide/Zoom-Transcript-Downloader-Quick-Start.pdf)
+- [Printable user guide (PDF)](./guide/Zoom-Transcript-Downloader-User-Guide.pdf)
 - [Architecture](./ARCHITECTURE.md)
 - [Design notes](./design/README.md) and [decisions](./design/DESIGN_CHOICES.md)
 - [Testing and evidence limits](./TESTING.md)
 - [Release criteria](./RELEASE_CRITERIA.md)
 
-Printable PDFs and older screenshots are legacy artifacts and may show the former recordings-only UI. Follow this README and USER_GUIDE.md for the current guided workflow.
+The printable PDFs are regenerated from the current guided-workflow HTML guides. Older screenshots may still show the former recordings-only UI; follow the current guides for the supported workflow.
 
 Supported browsers: Chrome and Microsoft Edge. See [LICENSE](./LICENSE).
