@@ -45,8 +45,10 @@ let stickyPanelMessage = null;
 let currentDownloadFolderName = null;
 let pendingTranscriptWaiters = [];
 let transcriptResponseQueue = [];
+let pendingRecordingMetadataScan = null;
 let sourceWorkerRun = null;
 let sourceRunRequested = false;
+let guidedWorkspace = false;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -59,9 +61,9 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-async function startCoordinatedSourceRun(mode) {
+async function startCoordinatedSourceRun(mode, explicitSelected = null) {
   const settings = await getSettings();
-  const selected = mode === 'page' ? ['recordings'] : sourceApi.orderedSources({ recordings: document.querySelector('#ztd-source-recordings')?.checked, myNotes: document.querySelector('#ztd-source-notes')?.checked });
+  const selected = Array.isArray(explicitSelected) ? sourceApi.orderedSources(Object.fromEntries(explicitSelected.map(s => [s === 'recordings' ? 'recordings' : 'myNotes', true]))) : mode === 'page' ? ['recordings'] : sourceApi.orderedSources({ recordings: document.querySelector('#ztd-source-recordings')?.checked, myNotes: document.querySelector('#ztd-source-notes')?.checked });
   if (!selected.length) { showToast('Select at least one source.', 'warn'); return; }
   sourceRunRequested = true;
   saveAllController = { running: true, stopRequested: false };
@@ -149,6 +151,46 @@ function scanRows() {
   });
 }
 
+// Read only the occurrence key supplied by Zoom's recording-list app model.
+// Visible meta.meetingId is the recurring meeting number and is not a matcher.
+function requestRecordingMetadataScan(timeoutMs = 60000) {
+  if (pendingRecordingMetadataScan) return Promise.reject(new Error('A recording metadata scan is already running.'));
+  const requestId = 'scan-' + crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (pendingRecordingMetadataScan?.requestId !== requestId) return;
+      pendingRecordingMetadataScan = null;
+      reject(new Error('Timed out waiting for the authenticated Zoom recording metadata scan.'));
+    }, timeoutMs);
+    pendingRecordingMetadataScan = { requestId, resolve, reject, timer };
+    window.postMessage({ source: 'ztd-recording-metadata-request', action: 'scan', requestId }, location.origin);
+  });
+}
+
+function acceptRecordingMetadataResult(payload) {
+  const pending = pendingRecordingMetadataScan;
+  if (!pending || payload?.requestId !== pending.requestId) return;
+  clearTimeout(pending.timer);
+  pendingRecordingMetadataScan = null;
+  if (payload.ok !== true || payload.exhausted !== true || !Array.isArray(payload.rows)) {
+    pending.reject(new Error(payload.error || 'Zoom recording metadata scan was incomplete.'));
+    return;
+  }
+  const rows = payload.rows.map(row => ({
+    sourceId: String(row.sortKey || ''),
+    occurrenceId: String(row.meetingId || ''),
+    title: String(row.topic || '').trim() || 'Untitled transcript',
+    date: String(row.createTime || ''),
+    available: typeof row.canDownload === 'boolean' ? row.canDownload : null,
+    availabilityReason: typeof row.canDownload === 'boolean' ? 'Zoom API canDownload metadata.' : 'Zoom API did not return availability.',
+  }));
+  if (rows.some(row => !row.sourceId || !row.occurrenceId)) {
+    pending.reject(new Error('Zoom recording metadata omitted an opaque row or occurrence ID.'));
+    return;
+  }
+  pending.resolve({ rows, pages: payload.pages, expectedCount: payload.expectedCount, terminalPage: payload.terminalPage });
+}
+
 function collectRows() {
   const rows = scanRows().filter(r => r.hasDownload);
   lastRows = rows;
@@ -222,6 +264,10 @@ function handleTranscriptResponseMessage(event) {
   if (event.source !== window) return;
   const data = event.data;
   if (!data || data.source !== 'zoom-transcript-extension') return;
+  if (data.type === 'recording-metadata-result') {
+    acceptRecordingMetadataResult(data.payload);
+    return;
+  }
   if (data.type === 'native-download-url' && saveAllController.running && sourceWorkerRun) {
     chrome.runtime.sendMessage({ type: EXTENSION_NS + ':expectRecordingNative', payload: { url: data.payload?.url } }).catch(() => {});
     return;
@@ -253,7 +299,7 @@ function ensureLauncher() {
     launcher.addEventListener('click', () => boot(true));
     document.body.appendChild(launcher);
   }
-  launcher.style.display = document.getElementById(PANEL_ID) ? 'none' : 'block';
+  launcher.style.display = guidedWorkspace || document.getElementById(PANEL_ID) ? 'none' : 'block';
 }
 
 function getPanelStats(rows) {
@@ -644,6 +690,26 @@ async function collectDownloadPlan(settings) {
   };
 }
 
+let guidedRecordingScanStopped = false;
+async function scanGuidedRecordingInventory() {
+  guidedRecordingScanStopped = false;
+  if (/login|signin|sign-in|sso/i.test(location.pathname) || document.querySelector('input[type="password"]')) return { ok: false, needsUserAction: true, error: 'Zoom sign-in is required before recording metadata can be scanned.' };
+  const search = document.querySelector('input[placeholder="Search by topic or meeting ID"]');
+  const period = document.querySelector('[role="combobox"][aria-label="Select a period of time"]');
+  if (!search || !period) return { ok: false, error: 'Could not verify Zoom search/date controls; scan is incomplete.' };
+  if ((search.value || '').trim() || (period.innerText || '').replace(/\s+/g, '') !== 'From-To') return { ok: false, error: 'Clear the Zoom date and search filters to scan the complete recordings list.' };
+  let apiScan;
+  try { apiScan = await requestRecordingMetadataScan(); }
+  catch (error) { return { ok: false, error: String(error?.message || error) }; }
+  if (guidedRecordingScanStopped) return { ok: false, stopped: true, error: 'Scan stopped before metadata pagination was exhausted.' };
+  const assets = apiScan.rows;
+  const expected = apiScan.expectedCount;
+  const pages = apiScan.pages;
+  const availableCount = assets.filter(asset => asset.available === true).length;
+  const unavailableCount = assets.filter(asset => asset.available === false).length;
+  if (Number.isFinite(expected) && expected !== assets.length) return { ok: false, assets, count: assets.length, pages, expectedCount: expected, error: 'Zoom reports ' + expected + ' rows but the authenticated API returned ' + assets.length + '.' };
+  return { ok: true, assets, count: assets.length, pages, expectedCount: expected, availableCount, unavailableCount, exhausted: true };
+}
 async function saveTranscriptRow(item, plannedEntry) {
   clearTranscriptResponseQueue();
   log('About to click transcript row', {
@@ -829,6 +895,7 @@ function renderPanel(rows, settings) {
       </div>
     `;
     document.body.appendChild(panel);
+    panel.hidden = guidedWorkspace;
 
     panel.querySelector('#ztd-close').addEventListener('click', () => { panel.remove(); ensureLauncher(); });
     panel.querySelector('#ztd-settings').addEventListener('click', async () => { const settingsModal = await populateSettingsModal(); settingsModal.hidden = false; });
@@ -1127,7 +1194,28 @@ async function boot(verbose = false) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'zoomTranscriptExtension:setGuidedWorkspace') {
+    guidedWorkspace = message.payload?.active === true;
+    const panel = document.getElementById(PANEL_ID); if (panel) panel.hidden = guidedWorkspace;
+    const launcher = document.getElementById(LAUNCHER_ID); if (launcher) launcher.style.display = guidedWorkspace ? 'none' : (panel ? 'none' : 'block');
+    sendResponse({ ok: true }); return false;
+  }
   if (message?.type === 'zoomTranscriptExtension:ping') {
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message?.type === 'zoomTranscriptExtension:scanGuidedRecordings') {
+    scanGuidedRecordingInventory().then(sendResponse).catch(error => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:stopGuidedScan') { guidedRecordingScanStopped = true; const pending = pendingRecordingMetadataScan; if (pending) { clearTimeout(pending.timer); pendingRecordingMetadataScan = null; pending.reject(new Error('Scan stopped before metadata pagination was exhausted.')); } sendResponse({ ok: true }); return false; }
+  if (message?.type === 'zoomTranscriptExtension:startGuidedDownload') {
+    startCoordinatedSourceRun('all', message.payload?.selected || []);
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message?.type === 'zoomTranscriptExtension:stopGuidedDownload') {
+    chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:stopSourceRun' }).catch(() => {});
     sendResponse({ ok: true });
     return false;
   }
@@ -1151,11 +1239,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
   if (message?.type === 'zoomTranscriptExtension:sourceRunProgress') {
+    chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedStatus', payload: { message: (message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes: ') + (message.payload?.message || message.payload?.state || 'Working') } }).catch(() => {});
     const activity = document.querySelector('#ztd-activity-note');
     if (activity) activity.textContent = (message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes transcripts: ') + (message.payload?.message || message.payload?.state || 'Working');
     return false;
   }
   if (message?.type === 'zoomTranscriptExtension:sourceRunFinished' || message?.type === 'zoomTranscriptExtension:sourceRunPaused') {
+    chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedFinished', payload: { message: message.payload?.needsUserAction ? 'Action needed: ' + message.payload.needsUserAction.reason : 'Downloads finished. Review saved, unavailable, failed, and pending totals for each source.', results: message.payload?.results } }).catch(() => {});
     sourceRunRequested = false;
     saveAllController.running = false;
     setSaveAllRunning(false);

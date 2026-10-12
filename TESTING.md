@@ -2,7 +2,7 @@
 
 ## How to run tests
 
-There is still no full automated browser test suite. Current validation is syntax, lightweight logic tests, and manual browser verification.
+There is still no full automated browser test suite. Current validation is syntax checks, 13 lightweight Node test files (24 test cases), and manual browser verification.
 
 ### Syntax validation
 ```bash
@@ -12,17 +12,12 @@ node --check content.js
 node --check page-hook.js
 ```
 
-### Lightweight automated logic test
+### Automated logic and lifecycle tests
 ```bash
-node tests/logic.test.mjs
-node tests/download-suppression.test.mjs
-node tests/source-logic.test.mjs
-node tests/source-plan.test.mjs
-node tests/coordinator.test.mjs
-node tests/notes-worker.test.mjs
-node tests/notes-full-run.test.mjs
-node tests/page-hook-worker.test.mjs
+node --test tests/*.test.mjs
 ```
+
+This runs all 13 test files (24 test cases at the 2026.10 release checkpoint). The suite includes isolated fixtures for guided inventory, scan readiness/retry, source matching, scrollbar accessibility, metadata bridge privacy, export gating, and existing download/coordinator behavior. It does not replace real-browser acceptance.
 
 ## Required manual verification after changes
 
@@ -134,6 +129,10 @@ Stop was exercised through the original panel while the second real export respo
 
 Live testing exposed a real Chrome filename-listener pitfall: bare suggest() reverted extension-initiated downloads to the server's filename despite chrome.downloads.download options. The fix reiterates the exact planned path only for the extension-owned, exact ephemeral source URL; a regression tests that actual schema. Four early diagnostic extension downloads consequently remain under their server filenames in Downloads (preserved, not deleted). Subsequent bounded and full runs used correct source paths, one file per attempt. Native fallback session recovery now persists a SHA-256 URL digest rather than the signed URL; redirected initial-URL correlation and unrelated manual URLs are tested.
 
-All **nine** suites (the eight existing suites plus notes-direct.test.mjs), classic/module JavaScript syntax checks, manifest JSON parsing, and git diff --check pass. Tests cover 401 Action needed, 403/404/no-transcript handling, hard login navigation preserving acknowledged counters, bounded 429 Retry-After seconds/date/long waits, one signed-URL refresh, changed app builds, missing list IDs, exact download ownership/dedupe, and late Stop. Independent same-role read-only QA found no confirmed blocker; its repeated-discovery concern was addressed with capability caching and its live-verification concerns were exercised. Real account expiry, regional account login, and Zoom rate limiting were not deliberately induced. A future non-anchor native export mechanism safely stops on uncorrelated download rather than attributing a manual file.
+All **nine legacy suites** plus notes-direct.test.mjs and guided-inventory.test.mjs (10 total), classic/module JavaScript syntax checks, manifest JSON parsing, and git diff --check pass. Tests cover 401 Action needed, 403/404/no-transcript handling, hard login navigation preserving acknowledged counters, bounded 429 Retry-After seconds/date/long waits, one signed-URL refresh, changed app builds, missing list IDs, exact download ownership/dedupe, and late Stop. Independent same-role read-only QA found no confirmed blocker; its repeated-discovery concern was addressed with capability caching and its live-verification concerns were exercised. Real account expiry, regional account login, and Zoom rate limiting were not deliberately induced. A future non-anchor native export mechanism safely stops on uncorrelated download rather than attributing a manual file.
 
 An LLM-provider rate-limit interruption paused engineering after the checkpoint; recovery reconciled an idle source coordinator and terminal downloads before continuing. It was not a user cancellation and no Gateway restart/configuration change was needed.
+
+### Guided workspace validation (2026.10)
+
+`guided-inventory.test.mjs` verifies exact explicit occurrence-ID overlap, no title or repeated numeric meeting-ID matching, Unknown handling, source preservation, complete-two-source review gating, and selected-save eligibility. `page-hook-worker.test.mjs` verifies the metadata bridge forwards only allowlisted fields and does not pass raw API responses into transcript capture. `guided-scan-retry.test.mjs` verifies bounded login/readiness retries, Stop, and terminal errors. The recording inventory scan accepts an empty terminal page only when Zoom explicitly reports `hasNextPage: false`; if an authoritative total was reported on data pages, it must match the collected rows. Empty pages with `hasNextPage: true`, missing continuation state, or a mismatched total fail closed and cannot certify a complete inventory. No live Zoom login/export or final production download verification was performed during this release-polish pass.

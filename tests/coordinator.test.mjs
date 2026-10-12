@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import fs from 'node:fs';
 import { createSourcePlan, orderSources } from '../lib/source-plan.mjs';
+import { sendWhenContentReady } from '../lib/content-readiness.mjs';
 import { createDownloadSuppression, shouldSuppressNativeTranscriptDownload } from '../lib/download-suppression.mjs';
 const script = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '');
 const event = () => ({ listeners: [], addListener(f) { this.listeners.push(f); } });
@@ -16,7 +17,7 @@ function fixture(session = {}) {
     tabs:{onUpdated:event(),onRemoved:event(),onActivated:event(),query:async()=>[],create:async opts=>{const t={id:tabId++,status:'complete',url:opts.url};created.push({...t,...opts});return t;},get:async id=>created.find(t=>t.id===id),remove:async id=>removed.push(id),update:async()=>{},sendMessage:async(id,message)=>{sent.push({id,...message});return {ok:true};}},
     downloads:{onCreated:event(),onChanged:event(),onDeterminingFilename:event(),cancel:async()=>{},removeFile:async()=>{},erase:async()=>{},download:async()=>1,search:async()=>[{state:'complete',fileSize:10}]},
   };
-  const ctx=vm.createContext({chrome,createSourcePlan,orderSources,createDownloadSuppression,shouldSuppressNativeTranscriptDownload,Map,Promise,Date,URL,crypto,TextEncoder,Uint8Array,btoa,unescape,encodeURIComponent,console}); vm.runInContext(script,ctx);
+  const ctx=vm.createContext({chrome,createSourcePlan,orderSources,sendWhenContentReady,createDownloadSuppression,shouldSuppressNativeTranscriptDownload,Map,Promise,Date,URL,crypto,TextEncoder,Uint8Array,btoa,unescape,encodeURIComponent,console,setTimeout}); vm.runInContext(script,ctx);
   const run=(expression)=>vm.runInContext(expression,ctx);
   return {ctx,run,chrome,session,local,sent,created,removed};
 }
@@ -57,10 +58,11 @@ const tick=()=>new Promise(r=>setImmediate(r));
  f.run('expectedNotesExportsByTab.set(10,expected)');
  await f.chrome.storage.session.set({'ztd:notes-export:10':f.ctx.expected});
  const handler=f.chrome.downloads.onDeterminingFilename.listeners[0];
- let suggestion;const native={id:5,url:'https://file-paa.zoom.us/export',referrer:'https://us01mynotes.zoom.us/note',mime:'text/plain'};
- assert.equal(handler(native,v=>suggestion=v),true);await tick();await tick();assert.equal(suggestion.filename,'root/My Notes/note.txt');
+ const native={id:5,url:'https://file-paa.zoom.us/export',referrer:'https://us01mynotes.zoom.us/note',mime:'text/plain'};
+ const suggestion=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('filename suggestion timed out')),2000);assert.equal(handler(native,value=>{clearTimeout(timer);resolve(value)}),true)});
+ assert.equal(suggestion.filename,'root/My Notes/note.txt');
  assert.equal(f.run('expectedNotesExportsByTab.size'),0);
- suggestion='unset';handler({...native,id:6,url:'https://file-paa.zoom.us/manual',referrer:'https://us01mynotes.zoom.us/note'},v=>suggestion=v);await tick();assert.equal(suggestion,undefined);
+ const unmatched=await new Promise(resolve=>handler({...native,id:6,url:'https://file-paa.zoom.us/manual',referrer:'https://us01mynotes.zoom.us/note'},resolve));assert.equal(unmatched,undefined);
  const restored=fixture(structuredClone(f.session));await restored.run('recoveryReady');
  restored.chrome.downloads.onChanged.listeners[1]({id:5,state:{current:'complete'}});await tick();
  assert.ok(restored.sent.some(m=>m.id===10&&m.payload.exportId==='e'&&m.payload.ok));

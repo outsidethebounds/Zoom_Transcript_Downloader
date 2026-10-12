@@ -9,9 +9,7 @@ Zoom Transcript Downloader is a Chrome and Microsoft Edge extension for saving t
 - Saves the available transcripts with organized filenames.
 - Skips transcript rows that Zoom shows as unavailable.
 
-The intended flow is simple:
-
-> Open your Zoom **Transcripts** page, confirm the panel appears, then click **Save selected sources**.
+The guided workspace opens on first install and from the extension toolbar. Enter or edit your company Zoom subdomain (pre-filled with the verified imprivata value), choose sources, and start a metadata-only scan of both Zoom lists. Review the complete inventory before saving. A failed or partial scan blocks downloads; retry after resolving the indicated access/filter issue.
 
 ## Installation
 
@@ -37,12 +35,12 @@ See the full guide for step-by-step instructions and screenshots.
 
 ## Quick Start
 
-1. Install the extension.
-2. Sign in to your Zoom web portal and open the **Transcripts** page for your recordings.
-3. Confirm the Zoom Transcript Downloader panel appears on the page.
-4. Click **Save selected sources**.
-5. Keep the Zoom tab open until the extension finishes.
-6. Look in your browser's **Downloads** location and configured transcript subfolder.
+1. Install the extension; its guided workspace opens automatically.
+2. Confirm or edit the company Zoom subdomain, then select Recording transcripts and/or My Notes transcripts.
+3. Click **Open Zoom and scan sources**. Sign in on Zoom if prompted; both lists are scanned for metadata only.
+4. Review the complete inventory and source counts. No downloads start before this review.
+5. Click **Save reviewed transcripts** and keep the browser open until the source summaries finish.
+6. Find files in your browser’s **Downloads** location, in the dated Recordings and My Notes folders.
 
 ## Documentation
 
@@ -73,12 +71,10 @@ Copyright (c) 2026 Blake Stover. All rights reserved.
 This repository is proprietary. No permission is granted to use, copy, modify, or redistribute this code without prior written permission.
 
 
-## Selected sources and My Notes (2026-10)
+## Guided workspace (2026.10)
 
-The panel is available on the recording Transcripts list and My Notes → All notes. Select Recording transcripts and/or My Notes transcripts, then choose **Save selected sources**. Recording transcripts are on by default; My Notes is off. Your selection is remembered.
+The extension opens a guided workspace on first install and from the toolbar. Confirm the company Zoom subdomain and choose Recording transcripts, My Notes transcripts, or both. Scanning opens the Zoom lists in background tabs, waits up to two minutes for sign-in/page readiness, and inventories metadata only. No transcript export or file download occurs during discovery. Review both complete source lists before explicitly choosing **Download selected transcripts**; incomplete scans block downloads. Source-specific availability remains Unknown where Zoom provides no verified metadata. Exact matching badges appear only for shared opaque occurrence IDs; unmatched items remain in their original source list.
 
-The extension leaves your list in place and works sequentially in inactive worker tabs: recordings first, then My Notes. **Save this page** instead saves only the current source’s visible list, regardless of checkboxes. **Stop** prevents the next export. My Notes cancels pending direct work; a file that already completed is preserved. Native UI fallback and recordings finish the current export. Read the per-source saved/skipped/failed summary when complete. **Action needed** means sign in in the worker tab, then restart the batch.
+After review, downloads run sequentially in inactive Zoom tabs. Files are saved beneath `ZoomTranscripts-MMDDYYYY/Recordings/` and `ZoomTranscripts-MMDDYYYY/My Notes/` under the configured Downloads subfolder. My Notes uses Zoom’s authenticated transcript export capability from the list note ID where available, with the existing enabled **Download transcript** UI control as fallback. A file already completed is preserved if Stop is pressed; the coordinator prevents later exports. Read the per-source saved/skipped/failed/pending summary when the run ends. Login, rate limits, unavailable transcripts, and ambiguous failures are not silently reported as successful.
 
-Files go beneath ZoomTranscripts-MMDDYYYY into **Recordings/** and **My Notes/** folders under the configured Downloads subfolder. Cross-source overlap is preserved. My Notes tries Zoom's authenticated transcript export directly from the list note ID, without opening each detail page. If that capability is unavailable or the app changes, it uses the existing enabled **Download transcript** UI control instead. Inaccessible notes are skipped; login, rate limits, and ambiguous failures are not silently treated as success or retried through the UI. A timed-out export stops the notes pass to avoid attributing a late file to the next note. My Notes IDs are opaque note identifiers, not meeting IDs.
-
-Older screenshots and printable PDFs show the recordings-only UI and have not been regenerated for this feature.
+No account login or final production export was performed as part of this release-polish pass. The workspace is covered by mocked metadata-only scan, gating, matching, retry, accessibility, and download-flow tests; real Zoom/browser acceptance remains environment-dependent. Older screenshots and printable PDFs may show the prior recordings-only UI.

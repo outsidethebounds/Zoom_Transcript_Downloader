@@ -25,10 +25,10 @@ This document defines what must be true before treating this private repo as a s
 
 The accepted user workflow is:
 1. install the extension from the Chrome Web Store link or by manual unpacked install
-2. open Zoom transcript page
-3. click **Save all**
-4. wait for downloads to finish
-5. confirm the transcript files were saved with the expected names in the chosen Downloads subfolder
+2. open the guided workspace and confirm the company Zoom subdomain and source selections
+3. sign in on Zoom when prompted and run metadata-only scans of both source lists
+4. review the complete inventory and source counts; incomplete scans cannot be downloaded
+5. explicitly choose **Download selected transcripts** and review per-source results
 
 This workflow is acceptable as long as the instructions remain clear and accurate.
 

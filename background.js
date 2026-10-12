@@ -1,5 +1,6 @@
 import { createDownloadSuppression } from './lib/download-suppression.mjs';
 import { createSourcePlan, orderSources } from './lib/source-plan.mjs';
+import { sendWhenContentReady } from './lib/content-readiness.mjs';
 
 const BASE_DEFAULTS = {
   filenamePattern: '{date} - {time} - {title}',
@@ -32,6 +33,7 @@ const expectedRecordingUrls = new Set();
 const sourceRunsById = new Map();
 const sourceRunByOriginTab = new Map();
 const sourceRunByWorkerTab = new Map();
+let guidedWorkspaceTabId = null;
 let persistQueue = Promise.resolve();
 function persistRuns() {
   const snapshots = [...sourceRunsById.values()].filter(r => !r.finished).map(r => ({ ...r, plan: r.plan.snapshot() }));
@@ -267,9 +269,28 @@ async function ensureExtensionUi(tabId, url) {
   if (!notesPage && !isTranscriptPageUrl(url)) return false;
   if (notesPage) await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['lib/notes-direct.js', 'my-notes-hook.js'] });
   if (await pingContentScript(tabId)) return true;
+  await injectContentScript(tabId, notesPage);
+  return await pingContentScript(tabId);
+}
+
+async function injectContentScript(tabId, notesPage) {
   await chrome.scripting.insertCSS({ target: { tabId }, files: CONTENT_SCRIPT_CSS_FILES }).catch(() => {});
   await chrome.scripting.executeScript({ target: { tabId }, files: notesPage ? NOTES_CONTENT_FILES : CONTENT_SCRIPT_FILES });
-  return await pingContentScript(tabId);
+}
+
+async function sendToReadyContentScript(tabId, url, message) {
+  const notesPage = isNotesListUrl(url);
+  return sendWhenContentReady({
+    ping: () => pingContentScript(tabId),
+    inject: async () => {
+      // Stale tabs after an extension reload may lack the isolated listener.
+      // These manifest-listed scripts have guards and are safe to reinject.
+      if (notesPage) await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['lib/notes-direct.js', 'my-notes-hook.js'] });
+      await injectContentScript(tabId, notesPage);
+    },
+    send: () => chrome.tabs.sendMessage(tabId, message),
+    pause: ms => new Promise(resolve => setTimeout(resolve, ms)),
+  });
 }
 
 function sanitizeSubfolder(path = '') {
@@ -343,7 +364,7 @@ async function startSourceWorkerInTab(run, tabId, url) {
     const message = source === 'recordings'
       ? { type: 'zoomTranscriptExtension:workerStartRecordings', payload: { runId: run.runId, mode: run.mode, folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope } }
       : { type: 'zoomTranscriptExtension:workerStartMyNotes', payload: { runId: run.runId, mode: run.mode, folderName, folderPath: folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope } };
-    await chrome.tabs.sendMessage(tabId, message);
+    await sendToReadyContentScript(tabId, url, message);
   } catch (error) {
     run.plan.complete(run.currentSource, { saved: 0, skipped: 0, failed: 1, error: 'Could not start the source worker: ' + String(error) });
     run.results = run.plan.results;
@@ -413,6 +434,8 @@ async function handleSourceWorkerResult(tabId, result) {
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const workspaceUrl = chrome.runtime.getURL?.('workspace.html');
+  if (workspaceUrl && String(tab.url || changeInfo.url || '').split(/[?#]/)[0] === workspaceUrl) guidedWorkspaceTabId = tabId;
   if (changeInfo.status === 'complete' || changeInfo.url) {
     const url = String(tab.url || changeInfo.url || '').split(/[?#]/)[0];
     if (isTranscriptPageUrl(url)) chrome.storage.local.set({ recordingListUrl: url }).catch(() => {});
@@ -431,6 +454,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener(tabId => {
+  if (tabId === guidedWorkspaceTabId) {
+    guidedWorkspaceTabId = null;
+    chrome.tabs.query({}).then(tabs => Promise.all(tabs.filter(t => t.url?.includes('.zoom.us/') && (t.url.includes('recording/meeting/transcript') || t.url.includes('/allNotes'))).map(t => chrome.tabs.sendMessage(t.id, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: false } }).catch(() => {})))).catch(() => {});
+  }
   for (const key of directNoteExports.keys()) if (key.startsWith(tabId + ':')) directNoteExports.delete(key);
   recoveryReady.then(async () => {
   const workerRun = sourceRunByWorkerTab.get(tabId);
@@ -444,12 +471,17 @@ async function refreshAllTabs() {
   await Promise.all((tabs || []).filter(t => typeof t.id === 'number').map(t => setActionForTab(t.id, t.url)));
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async details => {
   const targetOs = await inferDefaultOs();
   const defaults = { ...BASE_DEFAULTS, targetOs };
   const current = await chrome.storage.local.get(defaults);
   await chrome.storage.local.set({ ...defaults, ...current });
   await refreshAllTabs();
+  const installed = await chrome.storage.local.get('ztd:workspace-opened');
+  if (details?.reason === 'install' && !installed['ztd:workspace-opened']) {
+    await chrome.storage.local.set({ 'ztd:workspace-opened': true });
+    await chrome.tabs.create({ url: chrome.runtime.getURL('workspace.html'), active: true }).catch(() => {});
+  }
 });
 
 refreshAllTabs().catch(() => {});
@@ -460,10 +492,11 @@ chrome.runtime.onStartup?.addListener(async () => {
   refreshAllTabs().catch(() => {});
 });
 
-chrome.action.onClicked.addListener(async tab => {
-  if (tab?.id == null) return;
-  await ensureExtensionUi(tab.id, tab.url).catch(() => {});
-  await chrome.tabs.sendMessage(tab.id, { type: 'zoomTranscriptExtension:openPanel' }).catch(() => {});
+chrome.action.onClicked.addListener(async () => {
+  const url = chrome.runtime.getURL('workspace.html');
+  const existing = await chrome.tabs.query({ url: url + '*' });
+  if (existing[0]?.id != null) await chrome.tabs.update(existing[0].id, { active: true });
+  else await chrome.tabs.create({ url, active: true });
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -485,6 +518,7 @@ function makeDataUrl(content, mime = 'text/plain;charset=utf-8') {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'zoomTranscriptExtension:guidedWorkspaceOpened') { guidedWorkspaceTabId = _sender?.tab?.id ?? null; sendResponse({ ok: true }); return false; }
   if (message?.type === 'zoomTranscriptExtension:startSourceRun') {
     beginSourceRun(message.payload || {}, _sender, sendResponse).catch(error => sendResponse({ ok: false, error: String(error) }));
     return true;

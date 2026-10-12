@@ -9,7 +9,9 @@
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const say = (type, payload) => chrome.runtime.sendMessage({ type: NS + ':' + type, payload });
   let stopRequested = false;
+  let guidedNotesScanStopped = false;
   let activeWorker = false;
+  let guidedWorkspace = false;
   let panel;
   function setBusy(busy) { for (const id of ['ztd-notes-selected', 'ztd-notes-page']) { const b = panel?.querySelector('#' + id); if (b) b.disabled = busy; } }
   let pendingExportId = null;
@@ -56,7 +58,7 @@
     return [...document.querySelectorAll(LIST_SELECTOR)].map((row, index) => {
       const label = row.getAttribute('aria-label') || '';
       const meta = sourcesApi.parseNoteListLabel(label) || (label.trim() ? { title: label.trim(), dateISO: 'unknown-date', timeHHMM: 'unknown-time' } : null);
-      return meta ? { ...meta, id: row.getAttribute('data-ztd-note-id') || '', label, index, row } : null;
+      return meta ? { ...meta, id: row.getAttribute('data-ztd-note-id') || '', occurrenceId: row.getAttribute('data-ztd-occurrence-id') || '', label, index, row } : null;
     }).filter(Boolean);
   }
   function scrollRoot() {
@@ -89,6 +91,50 @@
       if (stopRequested) break;
     }
     return [...byKey.values()];
+  }
+  async function scanGuidedNotes() {
+    guidedNotesScanStopped = false;
+    if (isLoginBlocker()) return { ok: false, needsUserAction: true, error: 'Sign in to My Notes in this tab, then rescan.' };
+    const keyword = document.querySelector('input[placeholder*="Search keywords"]');
+    const dateFilter = [...document.querySelectorAll('[role="combobox"]')].find(el => (el.getAttribute('aria-label') || '').toLowerCase() === 'date');
+    if (!keyword || !dateFilter) return { ok: false, error: 'Could not verify My Notes search/date filters; scan is incomplete.' };
+    if ((keyword.value || '').trim() || (dateFilter.innerText || '').trim() !== 'Date') return { ok: false, error: 'Clear My Notes search and date filters to scan the complete list.' };
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline && !document.querySelector(LIST_SELECTOR)) {
+      if (isLoginBlocker()) return { ok: false, needsUserAction: true, error: 'Sign in to My Notes in this tab, then rescan.' };
+      await sleep(300);
+    }
+    if (isLoginBlocker()) return { ok: false, needsUserAction: true, error: 'Sign in to My Notes in this tab, then rescan.' };
+    const root = scrollRoot();
+    root.scrollTop = 0;
+    await sleep(300);
+    const byId = new Map();
+    let unchangedAtBottom = 0;
+    let exhausted = false;
+    let pages = 0;
+    for (; pages < 1000; pages++) {
+      if (guidedNotesScanStopped) return { ok: false, stopped: true, assets: [...byId.values()], error: 'Scan stopped before list exhaustion.' };
+      for (const item of readRows()) {
+        const key = item.id || item.label;
+        if (key) byId.set(key, { sourceId: item.id || key, occurrenceId: item.occurrenceId || '', title: item.title || 'Untitled transcript', date: item.dateISO || '', available: null, availabilityReason: 'Availability is not probed during discovery; it will be confirmed only during an explicit save.' });
+      }
+      const before = byId.size;
+      const previousTop = root.scrollTop;
+      root.scrollTop = Math.min(root.scrollHeight, root.scrollTop + Math.max(250, Math.floor(root.clientHeight * .7)));
+      root.dispatchEvent(new Event('scroll', { bubbles: true }));
+      const atBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 2;
+      if (atBottom) window.postMessage({ source: 'ztd-notes-load-more' }, location.origin);
+      await sleep(850);
+      for (const item of readRows()) {
+        const key = item.id || item.label;
+        if (key) byId.set(key, { sourceId: item.id || key, occurrenceId: item.occurrenceId || '', title: item.title || 'Untitled transcript', date: item.dateISO || '', available: null, availabilityReason: 'Availability is not probed during discovery; it will be confirmed only during an explicit save.' });
+      }
+      if (byId.size === before && root.scrollTop === previousTop && atBottom) unchangedAtBottom++; else unchangedAtBottom = 0;
+      if (unchangedAtBottom >= 2) { exhausted = true; pages++; break; }
+      if (stopRequested) return { ok: false, stopped: true, assets: [...byId.values()], error: 'Scan stopped before list exhaustion.' };
+    }
+    if (!exhausted) return { ok: false, error: 'My Notes did not reach a verified terminal page within the safe scan limit.', assets: [...byId.values()] };
+    return { ok: true, assets: [...byId.values()], count: byId.size, pages, exhausted: true, listOrigin: location.origin };
   }
   function isLoginBlocker() {
     const path = location.pathname.toLowerCase();
@@ -324,6 +370,7 @@
     panel.id = PANEL_ID;
     panel.innerHTML = '<strong>Zoom Transcript Downloader</strong><div class="ztd-source-options"><label><input type="checkbox" id="ztd-source-recordings"> Recording transcripts</label><label><input type="checkbox" id="ztd-source-notes"> My Notes transcripts</label></div><div class="ztd-source-actions"><button type="button" id="ztd-notes-selected">Save selected sources</button><button type="button" id="ztd-notes-page">Save this page</button><button type="button" id="ztd-notes-stop">Stop</button></div><div id="ztd-notes-status">Ready</div><pre id="ztd-notes-results"></pre>';
     document.body.appendChild(panel);
+    panel.hidden = guidedWorkspace;
     const recording = panel.querySelector('#ztd-source-recordings');
     const notes = panel.querySelector('#ztd-source-notes');
     chrome.storage.local.get({ sources: sourcesApi.DEFAULT_SOURCES }).then(({ sources }) => {
@@ -353,8 +400,14 @@
     return panel;
   }
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === NS + ':setGuidedWorkspace') { guidedWorkspace = message.payload?.active === true; if (panel) panel.hidden = guidedWorkspace; sendResponse({ ok: true }); return false; }
     if (message?.type === NS + ':ping') { sendResponse({ ok: true }); return false; }
     if (message?.type === NS + ':openPanel') { addPanel(); sendResponse({ ok: true }); return false; }
+    if (message?.type === NS + ':scanGuidedNotes') {
+      scanGuidedNotes().then(sendResponse).catch(error => sendResponse({ ok: false, error: String(error) }));
+      return true;
+    }
+    if (message?.type === NS + ':stopGuidedScan') { guidedNotesScanStopped = true; sendResponse({ ok: true }); return false; }
     if (message?.type === NS + ':workerStartMyNotes') {
       activeWorker = true;
       panel?.remove(); panel = null;

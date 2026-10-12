@@ -43,6 +43,10 @@
         const item = fiber.memoizedProps?.item;
         if (!item?.id) continue;
         row.setAttribute('data-ztd-note-id', String(item.id));
+        // This is the occurrence key corresponding to the recording-list data.meetingId.
+        // Do not substitute the recurring meeting number or title/date fields.
+        const occurrenceId = item.meeting && (item.meeting.meetingId ?? item.meeting.meeting_id);
+        if ((typeof occurrenceId === 'string' || typeof occurrenceId === 'number') && String(occurrenceId).trim()) row.setAttribute('data-ztd-occurrence-id', String(occurrenceId).trim());
         break;
       }
     }
