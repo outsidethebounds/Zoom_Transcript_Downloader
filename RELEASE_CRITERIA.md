@@ -1,112 +1,47 @@
-# RELEASE CRITERIA
-
-## Purpose
-
-This document defines what must be true before treating this private repo as a stable general-availability-quality release for its intended audience.
+# Release criteria
 
 ## Product target
 
-### Audience
-- non-technical public users
+A usable Chrome/Edge extension for a signed-in Zoom user's accessible transcript files, with an extension-owned guided scan → review → explicit download workflow. It is not a company-wide inventory or export tool.
 
-### Distribution
-- private repo
-- stable enough for repeated real-world use
-- distributed either through the direct Chrome Web Store listing or manual unpacked installation
+## Required user workflow
 
-### Supported environments
-- Chrome on macOS
-- Chrome on Windows
-- Edge on Windows
-- `zoom.us` subdomain variants
-- current stable browser versions only
+1. First install opens the guided workspace; the toolbar button reopens it.
+2. User enters their Zoom company subdomain and selects Recording transcripts and/or My Notes transcripts.
+3. Both source lists are opened/reused and scanned for metadata only. Sign-in and SSO occur directly on Zoom.
+4. Both scans must be complete and the inventory reviewed. An incomplete/ambiguous scan blocks export.
+5. The user selects source(s) and explicitly chooses Download selected transcripts.
+6. Results distinguish saved, unavailable, failed, and remaining items per source; attention-needed states are not success.
 
-## Accepted workflow
+## Must-pass criteria
 
-The accepted user workflow is:
-1. install the extension from the Chrome Web Store link or by manual unpacked install
-2. open the guided workspace and confirm the company Zoom subdomain and source selections
-3. sign in on Zoom when prompted and run metadata-only scans of both source lists
-4. review the complete inventory and source counts; incomplete scans cannot be downloaded
-5. explicitly choose **Download selected transcripts** and review per-source results
+### Privacy, scope, and consent
+- Never request or store a Zoom password.
+- Scan only accessible signed-in-user source lists; do not imply company-wide access.
+- Discovery reads metadata only and never exports transcript content or downloads files.
+- Transcript file content is accessed only after explicit user download action.
+- Explain My Notes means transcript files only, not note text, AI summaries, or other documents.
 
-This workflow is acceptable as long as the instructions remain clear and accurate.
+### Inventory correctness
+- Recording pagination finishes only with Zoom's explicit terminal hasNextPage false signal and any authoritative total matches collected rows; no hardcoded live item counts.
+- Both source lists are retained separately. Only verified exact shared occurrence identifiers produce reciprocal association badges. Missing links remain uncertain, and exact unique-total availability is stated separately.
+- Source availability supports available/unavailable/unknown and is not conflated with cross-source matching.
+- Company or source URL changes after review invalidate the inventory before export.
+- Custom scroll rail keyboard and pointer behavior is verified; native-wheel and fresh SSO-to-export acceptance must be explicitly recorded before claiming them.
 
-## Must-pass release criteria
+### Export and completion truth
+- No export starts during discovery or before review and explicit source selection.
+- Saves are separated into dated Recordings and My Notes folders under Downloads.
+- Existing completed files are preserved; conflicts do not overwrite them.
+- Stop prevents later exports. Final summaries report actual outcomes and remaining work. Do not claim automatic resume, granular asset-level selection, or full export success unless implemented and verified.
+- Login/access/readiness and other failures remain actionable, bounded, and clearly distinguished from completion.
 
-### A. All-pages download reliability
-The extension must:
-- open correctly on the Zoom transcript page
-- detect downloadable rows accurately
-- exclude rows whose download button is disabled/unavailable
-- reset to page 1 before `Save all`
-- abort clearly if page-1 reset fails
-- traverse all available transcript pages
-- not loop indefinitely across pages
-- support starting from a non-first page without producing a partial run
+### Documentation and packaging
+- End-user docs reflect the guided primary workflow and separate the legacy page panel.
+- Privacy, source scope, Unknown states, retries/Stop, outputs, and real verification limits are clear.
+- Relative references work; old screenshots/PDFs are labelled as legacy until updated.
+- Manifest version/version_name follow repository release policy before packaging/store upload. A docs-only commit does not itself publish a release.
 
-### B. Direct-save and filename reliability
-The extension must:
-- save one final `.txt` file per transcript directly from the extension workflow
-- suppress or clean up duplicate native Zoom downloads during bulk saves
-- use default filename format:
-  - `date - time - title`
-- apply the configured filename pattern to final saved files
-- support saving into a user-configured Downloads subfolder
-- append meeting ID on collisions
-- support optional meeting ID inclusion in every filename
+## Verification status at 2026.10 documentation baseline
 
-### C. End-user usability
-The extension must:
-- default to collapsed panel state
-- keep debug mode hidden behind a toggle
-- provide a visible running-job notification during bulk download
-- provide Settings, Help & About, expand/collapse, and close affordances from the panel footer
-- clearly communicate the chosen save location and filename pattern
-
-### D. Documentation quality
-The repo must contain:
-- end-user instructions that match the actual workflow
-- maintainer handoff docs reflecting current architecture
-- testing guidance that matches actual verification expectations
-- release criteria that reflect the current intended product shape
-- a versioning note that requires incrementing `manifest.json` before packaging or upload
-
-## Manual validation checklist
-
-### Browser/runtime validation
-- [x] extension loads without stale-runtime issues after install/reload
-- [x] panel opens from extension icon
-- [x] transcript count looks sane
-- [x] disabled transcript rows are skipped
-- [x] running-job notification appears when save-all starts
-- [x] Help & About button opens the in-page Help & About window
-- [x] settings save correctly
-
-### Save-all validation
-- [x] starting on page 1 works
-- [x] starting on page 2+ resets correctly and still completes full run
-- [x] multi-page download goes past 15 items
-- [x] stop button works during run
-- [x] planned filenames stay stable across the full batch
-
-### Direct-save validation
-- [x] exactly one final transcript file is kept per row
-- [x] final output matches expected filenames
-- [x] configured filename pattern is applied to saved files
-- [x] configured Downloads subfolder is applied to saved files
-- [x] collision handling appends meeting ID when needed
-
-## Known acceptable limitations at release time
-These are acceptable for now if the core workflow is stable:
-- manual unpacked install remains necessary for development and some fallback installs
-- `content.js` remains large and not fully refactored
-- automated test coverage may remain basic/lightweight
-
-## Not acceptable at release time
-These are blockers:
-- stopping after page 1 during a normal multi-page run
-- saving duplicate transcript files for one row
-- silently saving the wrong final filename
-- requiring hidden/manual debugging knowledge for normal use
-- docs that contradict actual workflow
+The repository includes 13 Node test files with 24 cases for the documented mocked behaviors. This is not full live-browser acceptance. Live metadata/visual scroll-rail checks exist, but native-wheel behavior is not freshly confirmed. No fresh SSO-to-export acceptance is claimed. See TESTING.md for the manual checklist. No store/GitHub release or user-account export is part of a documentation-only change.

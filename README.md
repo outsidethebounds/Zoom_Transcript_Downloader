@@ -1,80 +1,36 @@
 # Zoom Transcript Downloader
 
-Zoom Transcript Downloader is a Chrome and Microsoft Edge extension for saving the transcript `.txt` files that appear on Zoom's web-based **Transcripts** page.
+Zoom Transcript Downloader is a Chrome and Microsoft Edge extension for saving transcript files available to the signed-in Zoom user.
 
-## What It Does
+## Current primary workflow (2026.10)
 
-- Finds the transcript entries that Zoom currently allows you to download.
-- Works through the transcript result pages for you.
-- Saves the available transcripts with organized filenames.
-- Skips transcript rows that Zoom shows as unavailable.
+1. Install the extension. The extension-owned guided workspace opens on first install; later open it from the toolbar button.
+2. Enter your organization's Zoom subdomain and choose Recording transcripts and/or My Notes transcripts.
+3. Select **Open Zoom and scan sources**. The extension opens/reuses both Zoom lists in background tabs and scans accessible metadata only. Sign in directly on Zoom/SSO if prompted. Discovery does not export transcript content or download files.
+4. Review both completed source inventories. Incomplete scans block download; recognized sign-in/readiness waits are bounded to two minutes.
+5. Select the sources to export and explicitly choose **Download selected transcripts**. Review per-source saved, unavailable, failed, and remaining results.
 
-The guided workspace opens on first install and from the extension toolbar. Enter or edit your company Zoom subdomain (pre-filled with the verified imprivata value), choose sources, and start a metadata-only scan of both Zoom lists. Review the complete inventory before saving. A failed or partial scan blocks downloads; retry after resolving the indicated access/filter issue.
+The scope is the signed-in user's accessible items, not a company-wide crawl. The extension never asks for or stores your password. It reads transcript metadata for review and transcript content only during a user-requested export. My Notes refers to transcript files, not note text, AI summaries, or other documents.
 
-## Installation
+A verified exact shared occurrence ID may produce a reciprocal **Also in My Notes / Also in Recordings** badge. Titles or numeric meeting IDs alone do not match. Missing associations stay uncertain; the exact cross-source unique-meeting total can remain unknown. Availability can also remain unknown until export.
 
-### Recommended: Chrome Web Store
+Files are saved beneath Downloads in a date-stamped ZoomTranscripts-MMDDYYYY folder with separate Recordings and My Notes subfolders. Existing files are preserved and conflicts uniquified. Settings in the legacy page panel control filename pattern and an optional Downloads subfolder.
 
-Install from the direct Chrome Web Store listing:
+## Install
 
-<https://chrome.google.com/webstore/detail/lbmejjnmnbjnoahehjfmhaiheopkgcdg>
-
-This listing is private or unlisted, so most users will open it from the direct link instead of finding it through a normal Chrome Web Store search.
-
-### Alternative: Manual Installation
-
-If you were given the source package directly, or you are testing/developing locally:
-
-1. Download the extension package and extract it first if it arrives as a ZIP file.
-2. Open `chrome://extensions` in Chrome or `edge://extensions` in Edge.
-3. Turn on **Developer mode**.
-4. Select **Load unpacked**.
-5. Choose the extracted folder that contains `manifest.json`.
-
-See the full guide for step-by-step instructions and screenshots.
-
-## Quick Start
-
-1. Install the extension; its guided workspace opens automatically.
-2. Confirm or edit the company Zoom subdomain, then select Recording transcripts and/or My Notes transcripts.
-3. Click **Open Zoom and scan sources**. Sign in on Zoom if prompted; both lists are scanned for metadata only.
-4. Review the complete inventory and source counts. No downloads start before this review.
-5. Click **Save reviewed transcripts** and keep the browser open until the source summaries finish.
-6. Find files in your browser’s **Downloads** location, in the dated Recordings and My Notes folders.
+Chrome Web Store direct listing: https://chrome.google.com/webstore/detail/lbmejjnmnbjnoahehjfmhaiheopkgcdg . It may be private/unlisted. Edge can install Chrome Web Store extensions if allowed. For manual install, extract the package, open chrome://extensions or edge://extensions, enable Developer mode, choose Load unpacked, and select the folder containing manifest.json.
 
 ## Documentation
 
-- [Full User Guide](./USER_GUIDE.md)
-- [Printable User Guide (PDF)](./guide/Zoom-Transcript-Downloader-User-Guide.pdf)
-- [Quick Start](./guide/QUICK_START.html)
-- [Quick Start PDF](./guide/Zoom-Transcript-Downloader-Quick-Start.pdf)
-
-## Supported Browsers
-
-- Google Chrome
-- Microsoft Edge
-
-## Development And Architecture
-
-Developer and maintainer docs are kept separate from the end-user guides:
-
+- [Current user guide](./USER_GUIDE.md)
+- [Quick Start HTML](./guide/QUICK_START.html)
+- [Legacy printable quick-start PDF](./guide/Zoom-Transcript-Downloader-Quick-Start.pdf)
+- [Legacy printable user-guide PDF](./guide/Zoom-Transcript-Downloader-User-Guide.pdf)
 - [Architecture](./ARCHITECTURE.md)
-- [Design notes](./design/README.md)
-- [Design choices](./design/DESIGN_CHOICES.md)
-- [Testing](./TESTING.md)
+- [Design notes](./design/README.md) and [decisions](./design/DESIGN_CHOICES.md)
+- [Testing and evidence limits](./TESTING.md)
 - [Release criteria](./RELEASE_CRITERIA.md)
 
-## License
+Printable PDFs and older screenshots are legacy artifacts and may show the former recordings-only UI. Follow this README and USER_GUIDE.md for the current guided workflow.
 
-Copyright (c) 2026 Blake Stover. All rights reserved.
-
-This repository is proprietary. No permission is granted to use, copy, modify, or redistribute this code without prior written permission.
-
-
-## Guided workspace (2026.10)
-
-The extension opens a guided workspace on first install and from the toolbar. Confirm the company Zoom subdomain and choose Recording transcripts, My Notes transcripts, or both. Scanning opens the Zoom lists in background tabs, waits up to two minutes for sign-in/page readiness, and inventories metadata only. No transcript export or file download occurs during discovery. Review both complete source lists before explicitly choosing **Download selected transcripts**; incomplete scans block downloads. Source-specific availability remains Unknown where Zoom provides no verified metadata. Exact matching badges appear only for shared opaque occurrence IDs; unmatched items remain in their original source list.
-
-After review, downloads run sequentially in inactive Zoom tabs. Files are saved beneath `ZoomTranscripts-MMDDYYYY/Recordings/` and `ZoomTranscripts-MMDDYYYY/My Notes/` under the configured Downloads subfolder. My Notes uses Zoom’s authenticated transcript export capability from the list note ID where available, with the existing enabled **Download transcript** UI control as fallback. A file already completed is preserved if Stop is pressed; the coordinator prevents later exports. Read the per-source saved/skipped/failed/pending summary when the run ends. Login, rate limits, unavailable transcripts, and ambiguous failures are not silently reported as successful.
-
-No account login or final production export was performed as part of this release-polish pass. The workspace is covered by mocked metadata-only scan, gating, matching, retry, accessibility, and download-flow tests; real Zoom/browser acceptance remains environment-dependent. Older screenshots and printable PDFs may show the prior recordings-only UI.
+Supported browsers: Chrome and Microsoft Edge. See [LICENSE](./LICENSE).

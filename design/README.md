@@ -1,12 +1,7 @@
-# Design Folder
+# Design folder
 
-This folder holds durable product and architecture rationale for the extension.
+This folder holds durable product and architecture rationale. The 2026.10 guided workspace workflow is primary; older recording-panel design descriptions are historical unless explicitly marked current.
 
-Current files:
-- `DESIGN_CHOICES.md` for the important workflow, UX, and technical decisions
-
-Use this folder for:
-- release rationale
-- workflow decisions
-- UX constraints
-- architecture tradeoffs that should survive individual coding sessions
+- [DESIGN_CHOICES.md](./DESIGN_CHOICES.md): current workflow and preserved historical decisions.
+- [Repository architecture](../ARCHITECTURE.md)
+- [Testing evidence and release boundaries](../TESTING.md)

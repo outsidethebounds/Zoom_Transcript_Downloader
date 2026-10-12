@@ -1,166 +1,37 @@
-# Design Choices
+# Design choices
 
-Last updated: 2026-08-29
+Last updated: 2026-10-12
 
-## Release identity
+## Current product workflow (2026.10)
 
-- Human-facing release label: `2026.09`
-- Manifest `version`: `2026.9`
-- Manifest `version_name`: `2026.09`
+The extension-owned guided workspace is the primary entry. It opens on first install and from the toolbar. The user supplies a Zoom subdomain and source choices, scans both supported lists for metadata, reviews the complete inventory, then explicitly starts the selected-source download. The legacy injected panel remains advanced/manual fallback and its old Save all / Save page workflow is not the current primary workflow.
 
-Why:
-- Chrome and Edge extension updates compare numeric dot-separated version segments.
-- We keep the machine version compatible with that rule while preserving the desired release label in the UI and docs.
+### Discovery and consent
 
-Release policy:
-- increment `manifest.json` `version` before any commit intended for packaging or store upload
-- keep `version_name` and human-facing guide labels aligned to that release
-- never upload a package whose manifest version is unchanged from the published package
+Discovery reads accessible Zoom list metadata and does not export transcript bodies or download files. User authentication stays on Zoom/SSO; the extension never prompts for or stores passwords. The account boundary is the signed-in user's accessible data, not an organization-wide crawl. Transcript content access begins only after explicit user download action.
 
-## Primary product goal
+### Association and unknown state
 
-This extension is meant to make Zoom transcript export feel like a single-step batch save, not a manual download-plus-rename process.
+Recording and My Notes remain separate source lists and folders. Only an exact verified shared occurrence identifier earns reciprocal cross-source badges; titles and numeric meeting IDs alone do not. Missing association data remains uncertain, so the exact unique meeting total can be unknown. Export availability is a separate state and may be unknown until save.
 
-Core goals:
-- save transcript files directly with final names
-- avoid duplicate native Zoom downloads
-- keep the workflow understandable for a non-technical user
-- stay browser-only
+### Export and safe outcomes
 
-## Two-pass direct-save flow
+Selected sources process sequentially in inactive Zoom tabs. Files go to a dated root with separate Recordings and My Notes folders under browser Downloads. Completed files are preserved, conflicts uniquified, and Stop prevents later exports. A current operation may finish or be safely canceled. Results must distinguish saved, unavailable, failed, and pending. Do not promise automatic resume or per-asset selection.
 
-The extension intentionally runs in two passes:
+My Notes uses Zoom's authenticated app export capability where available and retains the enabled Download transcript UI fallback for supported capability changes. It exports transcript files, not note text, AI summaries, or other documents. Avoid logging credentials, transcript contents, or signed URLs.
 
-1. scan every page and plan the final filenames
-2. go back and save files using that plan
+### Guided workspace presentation
 
-Why:
-- collision handling must work across the whole batch, not just one page
-- Zoom pagination is brittle, so planning first gives a stable save plan
-- it avoids inconsistent naming caused by save order
+Connect/setup fields are hidden on review/results. Responsive workspace content is distinct from the operating system window size. Inventory lists use an accessible custom scroll rail with keyboard and pointer interactions; native-wheel behavior still requires acceptance verification. Readiness waits are bounded to two minutes with explicit attention-needed outcomes.
 
-## Transcript capture model
+### Settings and outputs
 
-The extension does not trust Zoom’s native download filename behavior.
+Filename pattern defaults to {date} - {time} - {title}; supported fields include date, time, title, meeting ID. Optional destination is a subfolder under browser Downloads, not an arbitrary absolute path. Date-stamped root uses ZoomTranscripts-MMDDYYYY.
 
-Instead it:
-- clicks the Zoom download control
-- intercepts transcript response data in the page context
-- reads transcript text from that response
-- saves the file itself through the extension downloads API
+## Preserved historical decisions
 
-Why:
-- direct-save is simpler for users
-- the extension controls final filenames
-- rename scripts are no longer the primary workflow
+The older in-page recordings panel, its Save all and Save page actions, its two-pass pagination plan, and associated panel screenshots describe the legacy/manual workflow. They remain useful only for that surface and must not override the guided workflow in current end-user instructions. Earlier release label 2026.09 and its recordings-only assumptions are historical, superseded by the 2026.10 guided baseline. Keep the historical record; don't retroactively rewrite it as if the old design was always different.
 
-## Native-download suppression
+## Release/version policy
 
-During direct-save batches, Zoom’s own transcript download should be suppressed and cleaned up.
-
-Why:
-- otherwise users can get duplicate files
-- extension-owned saves are the intended output
-
-## Filename pattern setting
-
-The filename pattern field is intended to drive the actual saved filename.
-
-Supported tokens:
-- `{date}`
-- `{time}`
-- `{title}`
-- `{meetingId}`
-
-Default:
-- `{date} - {time} - {title}`
-
-Why:
-- the preview should closely match the final saved result
-- the user should be able to control naming without editing code
-- sanitization still must protect against invalid filesystem characters
-
-## Save-location setting
-
-The extension supports choosing a save subfolder under the browser Downloads folder.
-
-Example:
-- `Downloads/Work/Zoom/ZoomTranscripts-08182026`
-
-Why this is limited:
-- the current Chrome / Edge downloads API supports relative download paths
-- it does not offer a clean arbitrary absolute-folder picker for this workflow
-
-Design decision:
-- be honest in the UI about the constraint
-- support subfolders under `Downloads`
-- do not fake absolute-path selection
-
-The main panel should also make the active destination visible without forcing the user to open Settings.
-
-## Settings UI
-
-The settings modal intentionally avoids raw JSON output.
-
-Instead it shows:
-- a live filename example
-- a live save-location example
-- a plain saved confirmation
-
-Why:
-- examples are more useful than internal state dumps
-- the intended user flow is non-technical
-
-## Help & About modal
-
-The Help button in the panel footer now opens an in-page Help & About modal.
-
-It contains:
-- creator attribution
-- contact email
-- GitHub repo link
-
-Why:
-- it keeps the user in context
-- it is more useful than redirecting immediately to docs
-
-## Panel action hierarchy
-
-The main panel now separates primary work actions from utility controls.
-
-Current layout:
-- product title at the top
-- status card directly below the title
-- `Save all`, `Save page`, and `Stop` as the main action row
-- save location and activity beneath the actions
-- centered footer utility controls for Settings, Help, expand/collapse, and close
-
-Why:
-- keeps the bulk-download workflow obvious
-- prevents utility actions from visually competing with the primary task
-- makes the title read more like a product name than a toolbar label
-
-## Code organization
-
-Shared logic was split out of the old page monolith into:
-- `lib/core.js`
-- `lib/page.js`
-- `lib/runtime.js`
-
-Why:
-- reduce duplication between runtime and tests
-- keep parsing and naming logic reusable
-- make future changes safer
-
-## Known tradeoffs
-
-- Zoom DOM and network behavior are still external dependencies and can change.
-- `content.js` is smaller than before, but still orchestrates most runtime behavior.
-- The browser Downloads UI may not always reflect the real saved-file count during native-download suppression.
-
-## Guidance for future changes
-
-- preserve the direct-save model unless Zoom forces a fallback
-- keep the settings preview truthful to actual behavior
-- prefer clarity in the UI over internal debug noise
-- treat duplicate native downloads as regressions
+The repository's existing policy requires incrementing manifest version before packaging or store upload and aligning the human-facing version. A docs-only commit is not a store or extension release.

@@ -1,347 +1,76 @@
 # Zoom Transcript Downloader User Guide
 
-Version: 2026.09
+Version: 2026.10 (guided workspace baseline)
 
-## What Zoom Transcript Downloader Does
+## What it does
 
-Zoom Transcript Downloader helps you save the transcript text files that Zoom makes available on its web-based **Transcripts** page.
+Zoom Transcript Downloader is a Chrome/Edge extension for transcripts available to the Zoom account signed in through your browser. Its primary workflow opens an extension-owned guided workspace, scans two supported lists for metadata, lets you review the inventory, and exports only after you explicitly choose **Download selected transcripts**.
 
-Its main workflow is intentionally simple:
+Supported sources:
+- **Recording transcripts** — the Transcripts list in Zoom cloud recordings.
+- **My Notes transcripts** — Zoom My Notes → All notes entries that expose an exportable transcript.
 
-1. Open the Zoom **Transcripts** page.
-2. Confirm the Zoom Transcript Downloader panel appears.
-3. Click **Save selected sources**.
-4. Keep the Zoom tab open until the run finishes.
+The feature is scoped to the signed-in user's accessible items, not an organization-wide crawl. Discovery reads list metadata only: it does not export transcript text or download files. Titles, dates, and other metadata may be sensitive; handle the inventory and files accordingly.
 
-The extension then works through the available transcript pages, downloads the transcript text that Zoom allows, and saves the files with organized filenames.
+## Privacy and sign-in
 
-## Install The Extension
+Sign in directly on Zoom or your organization's SSO page. The extension never asks for or stores your Zoom password. It does read accessible transcript-list metadata to build the review inventory, and reads transcript file content only during a user-requested export. Files are saved by the browser under its Downloads location.
 
-### Recommended: Chrome Web Store
+## Install
 
-The easiest installation method is the direct Chrome Web Store listing:
+Install from the direct Chrome Web Store listing: https://chrome.google.com/webstore/detail/lbmejjnmnbjnoahehjfmhaiheopkgcdg . The listing may be private/unlisted and not appear in ordinary store search. Edge can install Chrome Web Store extensions; allow extensions from other stores if Edge prompts.
 
-<https://chrome.google.com/webstore/detail/lbmejjnmnbjnoahehjfmhaiheopkgcdg>
+For manual installation, extract the supplied ZIP, open chrome://extensions (Chrome) or edge://extensions (Edge), enable Developer mode, choose Load unpacked, then select the extracted directory containing manifest.json.
 
-Because this listing is private or unlisted, you will usually open it from the direct link instead of searching the Chrome Web Store.
+## Guided workflow: scan, review, download
 
-To install in Chrome:
+1. Install the extension. The guided workspace opens on first install; later open it from the extension toolbar button.
+2. Enter your organization's Zoom subdomain (the part before .zoom.us); do not enter a password. Select Recording transcripts, My Notes transcripts, or both for the later download. Selection is not authorization to export.
+3. Choose **Open Zoom and scan sources**. The extension opens/reuses both Zoom source lists in background tabs and scans metadata only. Sign in on Zoom/SSO if prompted. The workspace waits up to two minutes for recognized sign-in/page readiness; **Stop** cancels discovery. It may bring a Zoom tab forward when attention is needed.
+4. Review both source lists and availability states. Both scans must complete and pass source-completeness checks before download is enabled. If a scan is incomplete, retry after resolving access/readiness; partial inventory is not certified complete.
+5. Select the sources to export, then explicitly choose **Download selected transcripts**. This starts transcript export. Sources are processed sequentially in inactive Zoom tabs while the workspace shows progress/results.
+6. Review per-source saved, unavailable, failed, and remaining counts. **Action needed** is not success: sign in on the indicated Zoom tab, then restart the affected source. Completed files remain in place.
 
-1. Open the Chrome Web Store link.
-2. Select **Add to Chrome**.
-3. Review the prompt and approve the installation.
-4. Open the browser **Extensions** menu and confirm **Zoom Transcript Downloader** appears there.
-5. If you want easier access, pin the extension from the Extensions menu.
+After connection/results the workspace hides company/source setup. Its content is responsive and capped at 972px; this does not resize the browser or operating-system window. Changing the company target or a reviewed Zoom source URL invalidates the inventory; scan again. Keep the browser open during a run.
 
-### Microsoft Edge
+## Understand the inventory
 
-Microsoft Edge can install many Chrome Web Store extensions. If Edge shows a banner asking whether to allow extensions from other stores:
+Recording and My Notes items remain in separate lists. A verified exact shared occurrence identifier may show a reciprocal **Also in My Notes** or **Also in Recordings** badge. A title or numeric meeting ID alone is not enough. Missing associations remain in their source list as uncertain/unknown, not falsely grouped. Therefore the exact unique-meeting total across sources can be unknown even when both scans complete.
 
-1. Open the same Chrome Web Store link in Edge.
-2. Select **Allow extensions from other stores** if prompted.
-3. Select the extension's install button.
-4. Review the permissions prompt and finish the installation.
+Availability is distinct from association: **Available**, **Unavailable**, or **Availability unknown until save**. List metadata may not establish export permission; unknown is neither unavailable nor a guarantee. Results show actual saved, unavailable, failed, and pending outcomes.
 
-After installation, confirm **Zoom Transcript Downloader** appears in Edge's **Extensions** menu. Pin it if you want quick access.
+My Notes exports transcript files available from note entries. It does not download note text, AI summaries, or other meeting documents. The sources and output folders remain distinct even when a verified association is shown.
 
-### Alternative: Manual Installation
+## Files and naming
 
-Use manual installation if:
+Files go under the browser's Downloads directory, optionally inside the configured subfolder. Each run uses a date-stamped ZoomTranscripts-MMDDYYYY root with separate Recordings and My Notes directories. Existing files are preserved; conflicts are uniquified.
 
-- you were given the source package directly
-- Chrome Web Store installation is unavailable
-- you are testing or developing locally
+The legacy page-panel Settings control the filename pattern and Downloads subfolder. Default pattern: {date} - {time} - {title}. Tokens: {date}, {time}, {title}, {meetingId}. Meeting ID is optional unless enabled; collisions receive unique names. Missing date/time uses unknown-date / unknown-time rather than omitting a note. Review the preview before saving. Arbitrary absolute destinations are not supported; saves stay under browser Downloads.
 
-![Manual installation overview](./guide/manual-install-overview.svg)
+## Stop, retry, and failures
 
-1. Obtain the extension package or source folder.
-2. If it arrives as a ZIP file, extract it first.
-3. Do not try to load the ZIP file directly.
-4. Keep the extracted folder somewhere it will not be accidentally deleted or moved.
-5. Open the browser Extensions page:
-   - Chrome: `chrome://extensions`
-   - Edge: `edge://extensions`
-6. Turn on **Developer mode**.
-7. Select **Load unpacked**.
-8. Choose the extracted folder that contains `manifest.json`.
-9. Confirm **Zoom Transcript Downloader** appears in the browser.
-10. Optionally pin it from the browser's Extensions menu.
+Stop during a scan cancels discovery without beginning exports. During export it prevents later exports. Completed files remain; depending on the active source operation, the current operation may finish or be canceled safely. Check final counts; Stop does not roll back completed files.
 
-## Open Your Zoom Transcripts
+The extension does not certify partial scans, label ambiguous failures as saved, or promise automatic resume. Retry the source needing attention when practical. Existing files are preserved and conflicts uniquified. Unavailable entries may be skipped; authentication, rate limits, changed Zoom behavior, and ambiguous failures are reported rather than treated as success.
 
-Before using the extension, open the Zoom web page that lists transcript entries.
+## Legacy page panel (advanced/fallback)
 
-1. Sign in to your organization's Zoom web portal.
-2. Go to the area that contains cloud recordings or transcripts.
-3. Open the **Transcripts** tab or view.
-4. Confirm that transcript rows are visible on the page.
-
-Example URL format:
-
-`https://your-company.zoom.us/recording/meeting/transcript`
-
-That is only an example. Your Zoom hostname or navigation path may look different.
-
-![Example Zoom Transcripts page](./guide/zoom-transcript-page-anonymized.png)
-
-When you open a supported Zoom **Transcripts** page, the Zoom Transcript Downloader panel should appear automatically on the page.
-
-If you closed the panel earlier, use the browser extension icon from the **Extensions** menu to open it again.
-
-## Download All Available Transcripts
-
-![Main panel overview](./guide/panel-overview.svg)
-
-1. Open the Zoom **Transcripts** page.
-2. Confirm the Zoom Transcript Downloader panel is visible.
-3. Review the status count if you want.
-4. Click **Save selected sources**.
-5. Keep that Zoom tab open while the run is in progress.
-6. Wait for the completion message.
-
-If you only want the transcripts that are currently visible on the page, click **Save page** instead.
-
-## What Happens During A Download
-
-While the extension is running, it:
-
-1. returns to page 1 before starting
-2. reviews the transcript pages so it can plan the final filenames
-3. works through the available transcript rows
-4. saves the available transcript files
-5. skips rows that Zoom marks as unavailable
-6. shows the final result when the run finishes
-
-You do not need to manage the page changes yourself.
-
-## Where Your Files Are Saved
-
-Zoom Transcript Downloader saves files inside your browser's normal **Downloads** location.
-
-You can set a folder underneath Downloads, such as:
-
-- `Zoom Transcripts`
-- `Work/Zoom Transcripts`
-
-The final save path will look like:
-
-- `Downloads/Zoom Transcripts/ZoomTranscripts-08192026`
-- `Downloads/Work/Zoom Transcripts/ZoomTranscripts-08192026`
-
-For security reasons, browser extensions normally write inside the browser's Downloads location instead of saving directly anywhere on your computer.
-
-### Recommended: Use A Dedicated Transcript Folder
-
-For easier organization, we recommend using a dedicated folder for Zoom transcripts instead of mixing them with unrelated downloads.
-
-Example:
-
-`Downloads/Zoom Transcripts`
-
-This is optional. A dedicated transcript folder is recommended for organization, not required for the extension to work.
-
-## Customize File Names And Download Location
-
-![Settings overview](./guide/settings-overview.svg)
-
-Open **Settings** from the panel if you want to change how files are named or where they are organized under **Downloads**.
-
-### Filename Format
-
-Default filename format:
-
-`{date} - {time} - {title}`
-
-Example result:
-
-`2026-08-14 - 1601 - Team Weekly Sync.txt`
-
-### Available Placeholders
-
-You can customize filenames with placeholders.
-
-| Placeholder | Meaning | Example |
-| --- | --- | --- |
-| `{date}` | Meeting date in `YYYY-MM-DD` format | `2026-08-14` |
-| `{time}` | Meeting time in `HHMM` format | `1601` |
-| `{title}` | Zoom meeting title | `Team Weekly Sync` |
-| `{meetingId}` | Zoom meeting ID | `12345678901` |
-
-Example patterns:
-
-- `{date} - {time} - {title}`
-- `{date} - {title}`
-- `{date} - {time} - {title} - {meetingId}`
-
-### Meeting ID
-
-Meeting ID is not included in every filename by default, which keeps filenames cleaner.
-
-If two transcripts would otherwise receive the same filename, Zoom Transcript Downloader automatically adds the Meeting ID to keep those files unique.
-
-Turn on **Include meeting ID in every filename** if you want the Meeting ID to appear every time.
-
-### Download Folder
-
-Use **Save folder inside Downloads** to place transcripts in a subfolder beneath your browser's normal Downloads location.
-
-Examples:
-
-- `Zoom Transcripts`
-- `Work/Zoom`
-
-### Preview Your Settings
-
-The Settings dialog shows:
-
-- a filename preview
-- a destination preview
-
-Use those previews to confirm your settings before you save them.
-
-## Stop A Download
-
-If you need to interrupt a batch:
-
-1. Click **Stop**.
-2. The extension will finish the transcript it is currently saving.
-3. The run will then stop.
-
-Stop does not instantly cancel a transcript that is already being processed.
-
-## Unavailable Or Skipped Transcripts
-
-Some transcript rows shown by Zoom may not currently offer a working download action.
-
-When that happens, the extension skips those rows and continues with the available ones.
-
-Skipped transcripts do not automatically mean the extension failed.
+The older in-page panel remains on supported Zoom transcript pages as a manual/advanced workflow, not the primary guided workflow. It has source selection, Save selected sources, a current-page action, and settings/help/debug controls. Older instructions/screenshots referring to Save all, Save page, or an automatically appearing panel describe that legacy UI, not the guided workspace.
 
 ## Troubleshooting
 
-### The Extension Panel Does Not Appear
+- **Workspace did not open:** use the extension toolbar button. For manual installs, reload the extension in the browser Extensions page.
+- **Sign-in/access required or readiness timed out:** sign in directly on the indicated Zoom/SSO tab and retry. Readiness waits are bounded to two minutes.
+- **Scan incomplete:** do not export partial inventory. Check source access/list loading and retry. A recording scan is complete only with Zoom's explicit terminal pagination signal (hasNextPage false); an empty page without that signal is not proof. If Zoom reports an authoritative total, it must match collected rows.
+- **Company/source changed:** rescan; target changes invalidate reviewed inventory.
+- **No transcripts/some unavailable:** verify the source list and Zoom access. Availability may remain unknown until export.
+- **Files not where expected:** check Downloads, configured subfolder, dated root, and the separate source folders.
+- **Zoom changed:** the extension depends on Zoom's pages, pagination, authentication, and export behavior. Reload/update then retry; report the source and failure stage without transcript content or authentication data.
 
-Try these steps:
+## Validation and limitations
 
-1. Confirm you are on a supported Zoom **Transcripts** page.
-2. Wait a moment for the Zoom page to finish rendering after navigation.
-3. Confirm the extension is installed and enabled.
-4. Open the browser **Extensions** menu and select the extension icon to reopen the panel if you closed it.
-5. If you manually installed or updated the extension, open the browser Extensions page and select **Reload**, then refresh the Zoom tab.
+The 2026.10 baseline has 13 Node test files and 24 test cases, including guided inventory, paging boundaries, readiness/retry, metadata-bridge privacy, and export-flow mocks. These do not constitute a full live-browser acceptance test. Metadata inventory and custom scroll rails have been checked live; native-wheel rail behavior and a fresh SSO-to-export acceptance run are not established. Do not infer complete production acceptance from test counts or screenshots.
 
-### No Transcripts Are Found
+Older screenshots and printable PDFs may depict the former recordings-only/legacy panel. This current guide and README describe the guided workflow.
 
-1. Confirm Zoom is showing transcript rows on the page.
-2. Confirm you are on **Transcripts**, not a different recordings view.
-3. Refresh the Zoom page and wait for the list to finish loading.
-4. Confirm Zoom itself is offering transcript downloads for those entries.
-
-### Some Transcripts Were Skipped
-
-This usually means Zoom displayed transcript entries whose download action was unavailable.
-
-The extension intentionally skips unavailable rows so it can continue with the transcripts Zoom currently allows.
-
-### The Download Stopped Because The Page Changed
-
-This means the Zoom transcript list changed while the extension was processing it.
-
-Recommended recovery:
-
-1. Refresh the Zoom page.
-2. Wait for the transcript list to finish loading.
-3. Start **Save selected sources** again.
-
-### Files Are Not Where Expected
-
-Check these places:
-
-1. Your browser's normal **Downloads** location.
-2. The Downloads subfolder shown in **Settings**.
-3. The destination preview in **Settings**.
-4. The browser's downloads history page if needed.
-
-### Browser Prompts For Every File
-
-Batch downloading works best when the browser does not ask where to save every file.
-
-If you are prompted for each transcript:
-
-1. Open your browser download settings.
-2. Turn off **Ask where to save each file before downloading** in Chrome, or the equivalent per-download prompt in Edge.
-3. Try the batch again.
-
-### The Extension Stopped Working After A Zoom Update
-
-Zoom Transcript Downloader depends on Zoom's current website behavior, so Zoom page changes can occasionally break part of the workflow.
-
-If that happens:
-
-1. Check whether a newer extension build is available.
-2. If you installed manually, reload the extension from the browser Extensions page.
-3. Refresh the Zoom page and try again.
-4. Report the problem if it continues.
-
-## Advanced Troubleshooting And Debug Information
-
-Use **Show debug** only when you are diagnosing a problem or preparing a support report.
-
-Suggested workflow:
-
-1. Turn on **Show debug**.
-2. Reproduce the problem.
-3. Copy the relevant debug details or take a screenshot.
-4. Include that information when reporting the issue.
-
-The debug view may include meeting titles, meeting IDs, page information, and Zoom page URLs, so review it before sharing it outside your organization.
-
-## Updating The Extension
-
-### Chrome Web Store Version
-
-Browser-installed extensions normally update automatically through Chrome or Edge.
-
-If you believe you are still on an older version, close and reopen the browser, then check the extension again.
-
-### Manually Installed Version
-
-If you use **Load unpacked**:
-
-1. Replace or update the local extension files.
-2. Open `chrome://extensions` or `edge://extensions`.
-3. Select **Reload** for Zoom Transcript Downloader.
-4. Refresh the Zoom page.
-
-## Getting Help / Reporting A Problem
-
-Use **Help & About** from the `?` button in the panel footer for project information and the GitHub repository link.
-
-When reporting a problem, include:
-
-- which browser you used
-- whether you installed from the Chrome Web Store or manually
-- what you expected to happen
-- what actually happened
-- any relevant debug details or screenshots
-
-## Version / Compatibility Information
-
-This guide matches:
-
-- **Zoom Transcript Downloader** version `2026.09`
-- Supported browsers: **Google Chrome** and **Microsoft Edge**
-
-
-## Selected sources and My Notes (2026-10)
-
-The panel is available on the recording Transcripts list and My Notes → All notes. Select Recording transcripts and/or My Notes transcripts, then choose **Save selected sources**. Recording transcripts are on by default; My Notes is off. Your selection is remembered.
-
-The extension leaves your list in place and works sequentially in inactive worker tabs: recordings first, then My Notes. **Save this page** instead saves only the current source’s visible list, regardless of checkboxes. **Stop** prevents the next export. My Notes cancels pending direct work; a file that already completed is preserved. Native UI fallback and recordings finish the current export. Read the per-source saved/skipped/failed summary when complete. **Action needed** means sign in in the worker tab, then restart the batch.
-
-Files go beneath ZoomTranscripts-MMDDYYYY into **Recordings/** and **My Notes/** folders under the configured Downloads subfolder. Cross-source overlap is preserved. My Notes tries Zoom's authenticated transcript export directly from the list note ID, without opening each detail page. If that capability is unavailable or the app changes, it uses the existing enabled **Download transcript** UI control instead. Inaccessible notes are skipped; login, rate limits, and ambiguous failures are not silently treated as success or retried through the UI. A timed-out export stops the notes pass to avoid attributing a late file to the next note. My Notes IDs are opaque note identifiers, not meeting IDs.
-
-Title-only notes are included in discovery. If their list entry has no date/time, filenames use `unknown-date` / `unknown-time` rather than dropping the note. The report includes discovered, confirmed eligible, processed exports, pending notes, skip reasons, and direct/fallback save counts. Filenames are planned from all discovered metadata before access filtering; eligibility is confirmed by export success or an enabled fallback control, not guessed list permission fields. A navigation failure is an error, not an inaccessible-note skip.
-
-If recordings completed but My Notes failed, uncheck Recording transcripts and retry **My Notes only**. Existing files are preserved; filename conflicts are uniquified, never overwritten.
-
-Older screenshots and printable PDFs show the recordings-only UI and have not been regenerated for this feature.
+Supported browsers: Google Chrome and Microsoft Edge. Zoom's site behavior can change. Before sharing debug details/screenshots, check for meeting metadata, URLs, or other sensitive information.

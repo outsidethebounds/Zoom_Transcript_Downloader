@@ -1,4 +1,18 @@
-# DECISIONS
+# Decisions
+
+## Current workflow decisions (2026.10; authoritative for current product)
+
+- The extension-owned guided workspace is the primary user entry; the older injected panel and its Save all / Save page actions are legacy/advanced fallback.
+- Discovery scans accessible metadata from both Recording transcripts and My Notes; it does not export transcript bodies. Both scans must be complete and reviewed before explicit selected-source export.
+- Authentication stays on Zoom/SSO; no extension password prompt or storage. Scope is the signed-in user's accessible items, not company-wide.
+- Exact verified shared occurrence identifiers alone produce reciprocal cross-source badges. Missing association and unknown availability remain distinct; do not invent a unique count.
+- Stop prevents subsequent exports; completed files are preserved. Do not promise automatic resume or asset-level selection.
+- Files use a dated root with source-separated folders under Downloads. My Notes means transcript files only.
+- Current evidence is 13 mocked Node test files / 24 cases, not fresh SSO-to-export acceptance. Native-wheel scroll behavior remains unconfirmed.
+
+The numbered decisions below are preserved historical records. Where they describe the injected recordings panel, Save all, Save page, or 2026.09 behavior, they apply only to that older surface and are superseded for the primary guided workflow by the decisions above.
+
+---
 
 ## 1. Use a browser-only architecture instead of a localhost helper
 - **Session context:** This session
@@ -77,59 +91,3 @@
 - **Consequences:**
   - docs can encourage tidy organization without overstating a technical requirement
   - user workflow stays simple and honest
-
-## 10. Keep debug mode, but behind a toggle
-- **Session context:** User specified in this session
-- **Status:** Active
-- **Decision:** Keep debug logging available but hidden by default.
-- **Consequences:**
-  - cleaner UX
-  - still debuggable when Zoom DOM changes
-
-## 11. Optimize for simplicity in user UX, allow complexity internally
-- **Session context:** User explicitly approved this in session
-- **Status:** Active
-- **Decision:** Internal implementation can get more sophisticated if needed, as long as user workflow stays simple.
-- **Consequences:**
-  - code may become more complex
-  - UI/workflow should remain constrained and clear
-
-## 12. Support both direct-link Web Store install and manual install
-- **Session context:** User specified in this session
-- **Status:** Active
-- **Decision:** Treat the direct Chrome Web Store listing as the recommended install path, while keeping manual Load unpacked installation fully documented for development, testing, and fallback use.
-- **Consequences:**
-  - end-user docs should present the Web Store first
-  - manual install remains part of the supported workflow
-
-## 13. Treat unavailable transcript rows as first-class UI state
-- **Session context:** Release hardening / bug-fix pass
-- **Status:** Active
-- **Decision:** Count greyed-out transcript rows separately and tell the user when rows are unavailable instead of pretending the page has fewer rows.
-- **Consequences:**
-  - clearer user expectations during save-all runs
-  - less confusion when some meetings have no transcript available
-
-## 14. Accept both `1 day` and `N days` in row parsing
-- **Session context:** Real-world pagination bug fix on live Zoom data
-- **Status:** Active
-- **Decision:** Row parser must accept both singular and plural age text from Zoom transcript listings.
-- **Consequences:**
-  - avoids dropping last-page rows that say `1 day`
-  - protected by the local logic regression test
-
-## 15. Show lightweight in-page job notifications for save-all runs
-- **Session context:** UX polish pass
-- **Status:** Active
-- **Decision:** Show a visible running-job message/toast when bulk download begins and a completion/stop notification afterward.
-- **Consequences:**
-  - users get immediate feedback that the job is active
-  - slightly more UI state to maintain
-
-## 16. Increment manifest version before packaging or release commits
-- **Session context:** Release packaging fix on 2026-08-29
-- **Status:** Active
-- **Decision:** Bump `manifest.json` `version` before any commit intended for packaging, upload, or release distribution.
-- **Consequences:**
-  - avoids Chrome Web Store / Edge rejection for unchanged version numbers
-  - requires docs and generated guides to stay aligned with the bumped release label
