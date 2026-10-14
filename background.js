@@ -354,10 +354,17 @@ async function startNextSource(run) {
   }
   sourceRunNotice(run, 'sourceRunProgress', { source, state: 'starting', message: 'Opening the ' + (source === 'recordings' ? 'recordings' : 'My Notes') + ' worker tab.' });
   try {
-    const origin = run.guided && source === 'recordings' ? await chrome.tabs.get(run.originTabId).catch(() => null) : null;
+    const origin = source === 'recordings' ? await chrome.tabs.get(run.originTabId).catch(() => null) : null;
     const tabs = run.guided ? await chrome.tabs.query({}) : [];
     const reusableSource = source === 'recordings' ? origin : tabs.find(candidate => isNotesListUrl(candidate.url) && candidate.status === 'complete');
-    const reusable = run.guided && reusableSource && (source === 'recordings' ? reusableSource.id === run.originTabId : isNotesListUrl(reusableSource.url)) && reusableSource.status === 'complete';
+    // Reuse an already-loaded transcript list for guided work and the legacy
+    // all-recordings action. Keep the page-scoped legacy action isolated so its
+    // captured page scope is never replaced by a list worker.
+    const reusable = reusableSource && reusableSource.status === 'complete' && (
+      source === 'recordings'
+        ? reusableSource.id === run.originTabId && isTranscriptPageUrl(reusableSource.url) && (run.guided || run.mode !== 'page')
+        : run.guided && isNotesListUrl(reusableSource.url)
+    );
     const tab = reusable ? reusableSource : await chrome.tabs.create({ url: targetUrl, active: false, openerTabId: run.originTabId });
     run.workerTabOwned = !reusable;
     run.workerTabId = tab.id;
@@ -383,11 +390,12 @@ async function startSourceWorkerInTab(run, tabId, url) {
     if ((run.currentSource === 'recordings' && !isTranscriptPageUrl(url)) || (run.currentSource === 'myNotes' && !isNotesListUrl(url))) {
       await handleSourceWorkerResult(tabId, { runId: run.runId, source: run.currentSource, saved: 0, skipped: 0, failed: 0, needsUserAction: { url: String(url).split(/[?#]/)[0], reason: 'Open the signed-in Zoom source list in this worker tab, then retry.' } }); return;
     }
-    // Worker tabs belong to the guided run. Suppress the legacy panel before
-    // reinjection/worker messages so it cannot flash during document readiness.
-    await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: true } }).catch(() => {});
+    // Suppress the legacy panel in guided or extension-owned worker tabs before
+    // reinjection/messages; a reused legacy origin keeps its manual panel visible.
+    const suppressLegacyPanel = run.guided || run.workerTabOwned === true;
+    await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: suppressLegacyPanel } }).catch(() => {});
     await ensureExtensionUi(tabId, url);
-    await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: true } }).catch(() => {});
+    await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: suppressLegacyPanel } }).catch(() => {});
     const source = run.currentSource;
     const folderName = sourceFolderPath(run.rootFolder, source);
     const message = source === 'recordings'

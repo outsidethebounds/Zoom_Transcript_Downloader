@@ -133,6 +133,67 @@ const tick=()=>new Promise(r=>setImmediate(r));
 }
 {
  const f=fixture();await f.run('recoveryReady');
+ const origin={id:1,status:'complete',url:'https://acme.zoom.us/recording/meeting/transcript'};
+ f.chrome.tabs.get=async id=>id===1?origin:f.created.find(tab=>tab.id===id)||null;
+ f.chrome.tabs.query=async()=>[origin];
+ f.ctx.payload={selected:['recordings','myNotes'],originUrl:origin.url,settings:{},guidedWorkspace:true};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:"https://acme.zoom.us/recording/meeting/transcript"}},()=>{})');
+ const runId=f.session['ztd:source-runs'][0].runId;f.ctx.rid=runId;
+ await f.run('handleSourceWorkerResult(1,{runId:rid,source:"recordings",saved:1})');
+ assert.equal(f.created.length,1,'missing Notes source falls back to a dedicated worker tab');
+ assert.equal(f.created[0].url,'https://us01mynotes.zoom.us/allNotes');
+ assert.equal(f.sent.find(m=>m.type.endsWith('workerStartMyNotes'))?.id,10);
+ await f.run('handleSourceWorkerResult(10,{runId:rid,source:"myNotes",saved:1})');
+ assert.deepEqual(f.removed,[10],'only the extension-owned Notes fallback closes; original user Recording tab remains');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ const origin={id:1,status:'complete',url:'https://acme.zoom.us/recording/meeting/transcript'};
+ const notes={id:2,status:'complete',url:'https://us01mynotes.zoom.us/allNotes'};
+ f.chrome.tabs.get=async id=>id===1?origin:id===2?notes:f.created.find(tab=>tab.id===id)||null;
+ f.chrome.tabs.query=async()=>[origin,notes];
+ f.ctx.payload={selected:['recordings','myNotes'],originUrl:'https://acme.zoom.us/recording/meeting/transcript',settings:{},guidedWorkspace:true};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:"https://acme.zoom.us/recording/meeting/transcript"}},()=>{})');
+ const runId=f.session['ztd:source-runs'][0].runId;f.ctx.rid=runId;
+ await f.run('handleSourceWorkerResult(1,{runId:rid,source:"recordings",saved:1})');
+ assert.equal(f.created.length,0,'guided transition reuses an eligible existing My Notes tab');
+ assert.equal(f.sent.find(m=>m.type.endsWith('workerStartMyNotes'))?.id,2);
+ assert.equal(f.session['ztd:source-runs'][0].workerTabOwned,false);
+ await f.run('handleSourceWorkerResult(2,{runId:rid,source:"myNotes",saved:1})');
+ assert.deepEqual(f.removed,[],'neither user-created source tab is closed at completion');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ const origin={id:1,status:'complete',url:'https://acme.zoom.us/recording/meeting/transcript'};
+ f.chrome.tabs.get=async id=>id===1?origin:f.created.find(tab=>tab.id===id)||null;
+ f.ctx.payload={selected:['recordings'],originUrl:'https://acme.zoom.us/recording/meeting/transcript',settings:{},guidedWorkspace:true};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:"https://acme.zoom.us/recording/meeting/transcript"}},()=>{})');
+ assert.equal(f.created.length,0,'guided workspace reuses an eligible loaded recordings origin');
+ assert.equal(f.sent.find(m=>m.type.endsWith('workerStartRecordings'))?.id,1);
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ const origin={id:1,status:'complete',url:'https://acme.zoom.us/recording/meeting/transcript'};
+ f.chrome.tabs.get=async id=>id===1?origin:f.created.find(tab=>tab.id===id)||null;
+ f.ctx.payload={selected:['recordings'],originUrl:'https://acme.zoom.us/recording/meeting/transcript',settings:{}};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:"https://acme.zoom.us/recording/meeting/transcript"}},()=>{})');
+ assert.equal(f.created.length,0,'legacy Save selected reuses an eligible loaded recordings origin');
+ assert.equal(f.sent.find(m=>m.type.endsWith('workerStartRecordings'))?.id,1);
+ assert.equal(f.sent.filter(m=>m.type.endsWith('setGuidedWorkspace')).every(m=>m.payload.active===false),true,'legacy reuse leaves the manual page panel visible');
+ assert.equal(f.session['ztd:source-runs'][0].workerTabOwned,false,'reused user tab is never treated as extension-owned');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ const origin={id:1,status:'complete',url:'https://acme.zoom.us/recording/meeting/transcript'};
+ f.chrome.tabs.get=async id=>id===1?origin:f.created.find(tab=>tab.id===id)||null;
+ f.ctx.payload={selected:['recordings'],originUrl:'https://acme.zoom.us/recording/meeting/transcript',settings:{},mode:'page',scope:{page:4,rowKeys:['visible-row']}};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:"https://acme.zoom.us/recording/meeting/transcript"}},()=>{})');
+ assert.equal(f.created.length,1,'legacy current-page/manual action preserves its isolated worker tab');
+ assert.equal(f.created[0].url,origin.url);
+ assert.equal(f.sent.find(m=>m.type.endsWith('workerStartRecordings'))?.payload.scope.page,4);
+}
+{
+ const f=fixture();await f.run('recoveryReady');
  f.ctx.payload={selected:['recordings'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{}};
  await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
  f.created[0].url='https://example.com/repurposed';
