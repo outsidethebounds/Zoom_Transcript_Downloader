@@ -325,7 +325,7 @@ async function finishSourceRun(run, extra = {}) {
   run.finished = true;
   if (run.guided) {
     const rawResults = { ...(run.results || {}) };
-    if (extra.interrupted && run.currentSource && !rawResults[run.currentSource] && run.notesProgress) rawResults[run.currentSource] = run.notesProgress;
+    if (extra.interrupted && run.currentSource && !rawResults[run.currentSource]) { const progress = run.currentSource === 'myNotes' ? run.notesProgress : run.recordingsProgress; if (progress) rawResults[run.currentSource] = progress; }
     const results = Object.fromEntries(Object.entries(rawResults).map(([source, result]) => [source, {
       saved: Math.max(0, Number(result?.saved) || 0), skipped: Math.max(0, Number(result?.skipped) || 0),
       failed: Math.max(0, Number(result?.failed) || 0), pending: Math.max(0, Number(result?.pending) || 0), error: Boolean(result?.error),
@@ -434,6 +434,7 @@ async function stopSourceRun(originTabId) {
   run.stopRequested = true;
   run.plan.stop();
   await persistRuns();
+  sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'stopping', message: 'Stop requested. Waiting for the current safe operation.', progress: run.currentSource === 'myNotes' ? run.notesProgress || null : run.recordingsProgress || null });
   if (run.workerTabId) chrome.tabs.sendMessage(run.workerTabId, { type: 'zoomTranscriptExtension:stopSourceWorker' }).catch(() => {});
   else await finishSourceRun(run, { stopped: true });
 }
@@ -555,7 +556,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!tab) { await finishSourceRun(run, { interrupted: true }); const stored = await chrome.storage.session.get('ztd:last-guided-terminal'); sendResponse({ active: null, terminal: stored['ztd:last-guided-terminal'] || null }); return; }
       if (tab.status !== 'complete') { sendResponse({ active: { runId: run.runId, source: run.currentSource, unverified: true }, terminal: null }); return; }
       const worker = await chrome.tabs.sendMessage(run.workerTabId, { type: 'zoomTranscriptExtension:getSourceWorkerState' }).catch(() => null);
-      if (worker?.runId === run.runId && worker.active === true) { sendResponse({ active: { runId: run.runId, source: run.currentSource, active: true, progress: run.notesProgress || null }, terminal: null }); return; }
+      if (worker?.runId === run.runId && worker.active === true) { sendResponse({ active: { runId: run.runId, source: run.currentSource, active: true, progress: (run.currentSource === 'myNotes' ? run.notesProgress : run.recordingsProgress) || null }, terminal: null }); return; }
       if (!worker) { sendResponse({ active: { runId: run.runId, source: run.currentSource, unverified: true }, terminal: null }); return; }
       await finishSourceRun(run, { interrupted: true }); const stored = await chrome.storage.session.get('ztd:last-guided-terminal'); sendResponse({ active: null, terminal: stored['ztd:last-guided-terminal'] || null });
     }).catch(() => sendResponse({ active: null, terminal: null, unavailable: true }));
@@ -594,12 +595,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     recoveryReady.then(async () => {
       const run = sourceRunByWorkerTab.get(_sender?.tab?.id);
       if (run && message.payload?.runId === run.runId) {
-        if (run.currentSource === 'myNotes' && message.payload?.progress) {
+        if (message.payload?.progress) {
           const progress = message.payload.progress;
-          run.notesProgress = Object.fromEntries(['saved', 'skipped', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, Math.max(0, Number(progress[key]) || 0)]));
+          const sanitized = Object.fromEntries(['saved', 'skipped', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, progress[key] == null ? null : Math.max(0, Number(progress[key]) || 0)]));
+          if (run.currentSource === 'myNotes') run.notesProgress = sanitized; else if (run.currentSource === 'recordings') run.recordingsProgress = sanitized;
           await persistRuns();
         }
-        sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'running', message: message.payload?.message || 'Working', progress: message.payload?.progress || null });
+        sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'running', message: message.payload?.message || 'Working', progress: run.currentSource === 'myNotes' ? run.notesProgress || null : run.recordingsProgress || null });
       }
       sendResponse({ ok: !!run });
     }).catch(() => sendResponse({ ok: false }));

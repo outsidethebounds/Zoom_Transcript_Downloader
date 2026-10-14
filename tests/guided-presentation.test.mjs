@@ -36,7 +36,7 @@ test('company identity is locked during scan and rechecked before source export'
   const scan=workspace.slice(workspace.indexOf('async function runScans'),workspace.indexOf('async function saveReviewed'));
   const save=workspace.slice(workspace.indexOf('async function saveReviewed'),workspace.indexOf('async function primary'));
   assert.match(scan,/\$\('company'\)\.disabled=true/);
-  assert.match(scan,/finally\{scanBusy=false;\$\('company'\)\.disabled=false/);
+  assert.match(scan,/finally\{stopPending=false;scanBusy=false;\$\('company'\)\.disabled=false/);
   assert.match(scan,/if\(company\(\)!==scanCompany\)throw/);
   assert.match(save,/reviewedTargetsMatch\(reviewedTargets,currentTargets,sources\)/);
   assert.match(save,/Inventory discarded; scan again before downloading/);

@@ -43,7 +43,7 @@ const tick=()=>new Promise(r=>setImmediate(r));
  const restored=fixture(structuredClone(first.session));await restored.run('recoveryReady');
  assert.equal(restored.run('sourceRunByWorkerTab.size'),1);
  restored.ctx.rid=first.session['ztd:source-runs'][0].runId;
- await restored.run('stopSourceRun(1)');await restored.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",saved:1,stopped:true})');
+ await restored.run('stopSourceRun(1)');assert.ok(restored.sent.some(m=>m.type.endsWith('sourceRunProgress')&&m.payload.state==='stopping'));await restored.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",saved:1,stopped:true})');
  assert.equal(restored.created.length,0);assert.equal(restored.session['ztd:source-runs'].length,0);
 }
 {
@@ -104,6 +104,7 @@ const tick=()=>new Promise(r=>setImmediate(r));
  const runId=f.session['ztd:source-runs'][0].runId;
  await new Promise(resolve=>f.chrome.runtime.onMessage.listeners[0]({type:'zoomTranscriptExtension:sourceWorkerProgress',payload:{runId,progress:{saved:1,directSaved:1,discovered:32,eligible:1,processed:1,pending:31,signedUrl:'https://file-paa.zoom.us/private'},message:'Saved 1'}},{tab:{id:10}},resolve));
  assert.equal(JSON.stringify(f.session).includes('file-paa'),false,'progress persistence accepts counters only');
+ const forwarded=f.sent.find(m=>m.type.endsWith('sourceRunProgress')&&m.payload.progress);assert.equal(forwarded.payload.progress.saved,1);assert.equal('signedUrl' in forwarded.payload.progress,false,'source-page UI gets counters only');
  f.chrome.tabs.onUpdated.listeners[0](10,{url:'https://zoom.us/signin?secret=not-persisted'},{url:'https://zoom.us/signin?secret=not-persisted'});
  await tick();await tick();await tick();
  const paused=f.sent.find(m=>m.type.endsWith('sourceRunPaused'));

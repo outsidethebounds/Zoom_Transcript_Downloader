@@ -661,3 +661,4 @@
     width: 100%;
   }
 }
+ #ztd-guided-status-counts{margin-top:4px;font-weight:700}#ztd-guided-stop{margin-top:7px;padding:8px 14px;border:2px solid #991b1b;border-radius:8px;background:#b42318;color:#fff;font:700 14px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:pointer;pointer-events:auto}#ztd-guided-stop:hover{background:#912018}#ztd-guided-stop:focus-visible{outline:3px solid #2563eb;outline-offset:2px}#ztd-guided-stop:disabled{opacity:.8;cursor:wait}#ztd-guided-stop[hidden]{display:none!important}

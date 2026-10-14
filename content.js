@@ -58,17 +58,25 @@ let sourceWorkerRun = null;
 let sourceRunRequested = false;
 let guidedWorkspace = false;
 let guidedStatusTimer = null;
-function showGuidedStatus(message, persistent = false) {
+function showGuidedStatus(message, persistent = false, progress = null, stoppable = false, runId = null, stopping = false) {
   if (!guidedWorkspace) return;
   let bubble = document.getElementById('ztd-guided-status');
   if (!bubble) {
-    bubble = document.createElement('div'); bubble.id = 'ztd-guided-status'; bubble.setAttribute('role', 'status'); bubble.setAttribute('aria-live', 'polite');
-    document.body.appendChild(bubble);
+    bubble = document.createElement('section'); bubble.id = 'ztd-guided-status'; bubble.setAttribute('role', 'region'); bubble.setAttribute('aria-label', 'Transcript download progress');
+    const label = document.createElement('div'); label.id = 'ztd-guided-status-message'; label.setAttribute('role', 'status'); label.setAttribute('aria-live', 'polite'); bubble.appendChild(label);
+    const counts = document.createElement('div'); counts.id = 'ztd-guided-status-counts'; counts.setAttribute('aria-live', 'polite'); bubble.appendChild(counts);
+    const stop = document.createElement('button'); stop.id = 'ztd-guided-stop'; stop.type = 'button'; stop.textContent = 'Stop download';
+    stop.addEventListener('click', () => { if (stop.disabled) return; stop.disabled = true; stop.textContent = 'Stopping…'; label.textContent = 'Stop requested. Waiting for the current safe operation.'; chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:stopSourceRun' }).catch(() => {}); });
+    bubble.appendChild(stop); document.body.appendChild(bubble);
   }
-  bubble.textContent = String(message || 'Working'); bubble.hidden = false;
+  bubble.querySelector('#ztd-guided-status-message').textContent = String(message || 'Working');
+  const counts = bubble.querySelector('#ztd-guided-status-counts');
+  if (progress) { const saved = Number(progress.saved) || 0, unavailable = Number(progress.skipped) || 0, failed = Number(progress.failed) || 0, pending = Number.isFinite(progress.pending) ? progress.pending : '—'; counts.textContent = 'Saved ' + saved + ' · unavailable ' + unavailable + ' · failed ' + failed + ' · pending ' + pending; counts.hidden = false; } else { counts.hidden = true; }
+  const stop = bubble.querySelector('#ztd-guided-stop'); if (runId && bubble.dataset.runId !== runId) { stop.disabled = false; stop.textContent = 'Stop download'; bubble.dataset.runId = runId; } stop.hidden = !stoppable; if (stopping) { stop.disabled = true; stop.textContent = 'Stopping…'; }
+  bubble.hidden = false;
   if (guidedStatusTimer) clearTimeout(guidedStatusTimer);
   guidedStatusTimer = persistent ? null : setTimeout(() => { bubble.hidden = true; }, 4500);
-}
+};
 function hideGuidedStatus() {
   if (guidedStatusTimer) clearTimeout(guidedStatusTimer); guidedStatusTimer = null;
   const bubble = document.getElementById('ztd-guided-status'); if (bubble) bubble.hidden = true;
@@ -769,7 +777,6 @@ async function saveTranscriptRow(item, plannedEntry) {
   };
 
   if (saved?.ok) downloadManifest.push(entry);
-  if (sourceWorkerRun) chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:sourceWorkerProgress`, payload: { runId: sourceWorkerRun.runId, progress: { saved: downloadManifest.length, skipped: skippedUnavailable, failed: 0, pending: Number.isFinite(sourceWorkerRun.total) ? Math.max(0, sourceWorkerRun.total - downloadManifest.length - skippedUnavailable) : null }, message: 'Saved ' + downloadManifest.length + ' recording transcript' + (downloadManifest.length === 1 ? '' : 's') + ' so far.' } }).catch(() => {});
   updatePanelSummary();
   log('Saved transcript with final filename', entry);
 
@@ -1080,7 +1087,7 @@ function renderPanel(rows, settings) {
               targetFilename: pageEntries[i]?.targetFilename || null,
             });
             previousItemStartMs = await waitForNextRecordingStart(previousItemStartMs);
-            try { results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); }
+            try { results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); } if (sourceWorkerRun) { const saved = results.filter(result => result?.ok).length, failed = results.filter(result => result?.ok === false).length, total = sourceWorkerRun.total; const pending = Number.isFinite(total) ? Math.max(0, total - saved - skippedUnavailable - failed) : null; chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:sourceWorkerProgress', payload: { runId: sourceWorkerRun.runId, progress: { saved, skipped: skippedUnavailable, failed, pending }, message: 'Processed ' + (saved + skippedUnavailable + failed) + (Number.isFinite(total) ? ' of ' + total : '') + ' recording transcripts.' } }).catch(() => {}); }
           }
 
           if (sourceWorkerRun?.testLimit && results.length >= sourceWorkerRun.testLimit) break;
@@ -1269,8 +1276,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
   if (message?.type === 'zoomTranscriptExtension:sourceRunProgress') {
-    if (message.payload?.guided === true) showGuidedStatus((message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes: ') + (message.payload?.message || message.payload?.state || 'Working'), true);
-    chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedStatus', payload: { message: (message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes: ') + (message.payload?.message || message.payload?.state || 'Working') } }).catch(() => {});
+    if (message.payload?.guided === true) showGuidedStatus((message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes: ') + (message.payload?.message || message.payload?.state || 'Working'), true, message.payload?.progress || null, true, message.payload?.runId || null, message.payload?.state === 'stopping');
+    chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedStatus', payload: { message: (message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes: ') + (message.payload?.message || message.payload?.state || 'Working'), progress: message.payload?.progress || null } }).catch(() => {});
     const activity = document.querySelector('#ztd-activity-note');
     if (activity) activity.textContent = (message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes transcripts: ') + (message.payload?.message || message.payload?.state || 'Working');
     return false;
