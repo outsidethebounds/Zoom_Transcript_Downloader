@@ -123,4 +123,21 @@ const tick=()=>new Promise(r=>setImmediate(r));
  assert.equal(canceled,200,'Stop cancels only the correlated active direct download');
  assert.equal(f.run('directNoteFilenames.size'),0,'ephemeral source registry cleans up cancellation');
 }
+{
+ const f=fixture();await f.run('recoveryReady');
+ const handler=f.chrome.runtime.onMessage.listeners[0];
+ handler({type:'zoomTranscriptExtension:guidedWorkspaceOpened'},{tab:{id:900}},()=>{});
+ f.chrome.tabs.onRemoved.listeners[0](900);await tick();await tick();
+ assert.equal(f.sent.some(m=>m.type.endsWith('setGuidedWorkspace')&&m.payload.active===false),false,'closing workspace must not restore the legacy source panels');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ f.ctx.payload={selected:['recordings'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{}};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
+ f.created[0].url='https://example.com/repurposed';
+ f.ctx.rid=f.session['ztd:source-runs'][0].runId;
+ await f.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",saved:1,failed:0})');
+ assert.deepEqual(f.removed,[],'cleanup must not close an extension-created worker tab after user navigation');
+ assert.equal(f.session['ztd:source-runs'].length,0,'a terminal result still completes coordinator state');
+}
 console.log('coordinator.test.mjs: all tests passed');

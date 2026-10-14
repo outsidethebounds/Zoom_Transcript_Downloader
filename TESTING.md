@@ -29,9 +29,10 @@ The current 2026.10 baseline has 13 Node test files and 24 test cases. Tests are
 3. Use a test account only with authorization. Confirm SSO happens on Zoom, no extension password prompt exists, and scan reads metadata without starting export/downloads.
 4. Verify both source lists, visible scroll behavior using keyboard, pointer drag/track click, and native wheel. Check source labels, reciprocal exact-match badges, missing-association uncertainty, and availability Unknown separately.
 5. Verify scan failure/incomplete terminal paging blocks export; verify recognized login/access readiness gives actionable state and stops waiting after at most two minutes.
-6. Review sources, initiate export explicitly, verify the chosen source set, source-separated output folders, truthful saved/unavailable/failed/pending results, and Stop behavior. Confirm completed files are retained and no automatic resume or per-asset selection is implied.
-7. Change the company/source target after review and verify that the inventory is invalidated before export.
-8. Inspect only artifact names, paths, sizes, and counts in ordinary test notes. Never record transcript text, credentials, cookies, or signed URLs.
+6. Review sources, initiate export explicitly, verify the chosen source set, source-separated output folders, truthful saved/unavailable/failed/pending results, and Stop behavior. Confirm the centered source-page status bubble is read-only and visible only during active work/action-required state, then hides after terminal outcomes. Confirm completed files are retained and no automatic resume or per-asset selection is implied.
+7. Verify workspace close does not restore legacy source panels; sign-in/action-required workers remain open; terminal cleanup closes only an extension-created worker still at the run source URL; a repurposed worker tab remains open; and no user-created/reused source tab is closed.
+8. Change the company/source target after review and verify that the inventory is invalidated before export.
+9. Inspect only artifact names, paths, sizes, and counts in ordinary test notes. Never record transcript text, credentials, cookies, or signed URLs.
 
 Do not perform live scans, sign-ins, or downloads as routine unit-test validation. They require a separately authorized test account and user acceptance plan.
 

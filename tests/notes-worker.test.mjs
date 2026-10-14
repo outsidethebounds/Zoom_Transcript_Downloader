@@ -3,7 +3,7 @@ import vm from 'node:vm';
 import fs from 'node:fs';
 import sources from '../lib/sources.js';
 let source=fs.readFileSync(new URL('../my-notes.js',import.meta.url),'utf8');
-source=source.replace('  addPanel();\n})();','  globalThis.testAdapter = { collectNotes, clickTranscriptDownload, processNotes, currentNoteId };\n})();');
+source=source.replace("  chrome.runtime.sendMessage({ type: NS + ':getGuidedTabState' }).then(state => { guidedWorkspace = state?.guided === true; if (!guidedWorkspace) addPanel(); }).catch(() => addPanel());\n})();",'  globalThis.testAdapter = { collectNotes, clickTranscriptDownload, processNotes, currentNoteId };\n})();');
 let rows=[],buttons=[],top=0,phase=0;
 const root={clientHeight:500,scrollHeight:1200,get scrollTop(){return top},set scrollTop(v){top=Math.min(700,v)},dispatchEvent(){if(top>0){phase++;rows=[row('one','Note one 2026-10-11 10:00'),row('two','Note two 2026-10-11 11:00')];}},parentElement:null};
 function row(id,label){return {getAttribute:k=>k==='aria-label'?label:k==='data-ztd-note-id'?id:null,parentElement:root};}

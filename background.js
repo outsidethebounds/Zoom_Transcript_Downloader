@@ -34,6 +34,7 @@ const sourceRunsById = new Map();
 const sourceRunByOriginTab = new Map();
 const sourceRunByWorkerTab = new Map();
 let guidedWorkspaceTabId = null;
+const guidedSourceTabIds = new Set();
 let persistQueue = Promise.resolve();
 function persistRuns() {
   const snapshots = [...sourceRunsById.values()].filter(r => !r.finished).map(r => ({ ...r, plan: r.plan.snapshot() }));
@@ -41,6 +42,7 @@ function persistRuns() {
   return persistQueue;
 }
 const recoveryReady = chrome.storage.session.get(null).then(stored => {
+  for (const id of stored['ztd:guided-source-tabs'] || []) if (Number.isInteger(id)) guidedSourceTabIds.add(id);
   const batch = stored['ztd:recording-batch'];
   if (batch) { activeBatchFolderName = batch.folder; activeBatchMode = batch.mode; activeBatchTabId = batch.tabId; }
   for (const url of stored['ztd:recording-native-urls'] || []) expectedRecordingUrls.add(url);
@@ -307,13 +309,21 @@ function sourceFolderPath(root, source) {
 }
 function sourceRunNotice(run, type, payload = {}) {
   if (typeof run.originTabId !== 'number') return;
-  chrome.tabs.sendMessage(run.originTabId, { type: 'zoomTranscriptExtension:' + type, payload: { runId: run.runId, ...payload } }).catch(() => {});
+  chrome.tabs.sendMessage(run.originTabId, { type: 'zoomTranscriptExtension:' + type, payload: { runId: run.runId, guided: run.guided === true, ...payload } }).catch(() => {});
+}
+async function closeOwnedWorkerIfStillOnSource(run, tabId) {
+  if (typeof tabId !== 'number') return false;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const stillOnSource = tab && (run.currentSource === 'recordings' ? isTranscriptPageUrl(tab.url) : isNotesListUrl(tab.url));
+  if (!stillOnSource) return false;
+  await chrome.tabs.remove(tabId).catch(() => {});
+  return true;
 }
 async function finishSourceRun(run, extra = {}) {
   if (run.finished) return;
   run.finished = true;
   if (run.workerTabId) sourceRunByWorkerTab.delete(run.workerTabId);
-  if (run.workerTabId && !extra.keepWorker) await chrome.tabs.remove(run.workerTabId).catch(() => {});
+  if (run.workerTabId && !extra.keepWorker) await closeOwnedWorkerIfStillOnSource(run, run.workerTabId);
   sourceRunByOriginTab.delete(run.originTabId);
   sourceRunsById.delete(run.runId);
   await persistRuns();
@@ -358,7 +368,11 @@ async function startSourceWorkerInTab(run, tabId, url) {
     if ((run.currentSource === 'recordings' && !isTranscriptPageUrl(url)) || (run.currentSource === 'myNotes' && !isNotesListUrl(url))) {
       await handleSourceWorkerResult(tabId, { runId: run.runId, source: run.currentSource, saved: 0, skipped: 0, failed: 0, needsUserAction: { url: String(url).split(/[?#]/)[0], reason: 'Open the signed-in Zoom source list in this worker tab, then retry.' } }); return;
     }
+    // Worker tabs belong to the guided run. Suppress the legacy panel before
+    // reinjection/worker messages so it cannot flash during document readiness.
+    await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: true } }).catch(() => {});
     await ensureExtensionUi(tabId, url);
+    await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: true } }).catch(() => {});
     const source = run.currentSource;
     const folderName = sourceFolderPath(run.rootFolder, source);
     const message = source === 'recordings'
@@ -369,7 +383,7 @@ async function startSourceWorkerInTab(run, tabId, url) {
     run.plan.complete(run.currentSource, { saved: 0, skipped: 0, failed: 1, error: 'Could not start the source worker: ' + String(error) });
     run.results = run.plan.results;
     sourceRunByWorkerTab.delete(tabId);
-    await chrome.tabs.remove(tabId).catch(() => {});
+    await closeOwnedWorkerIfStillOnSource(run, tabId);
     run.workerTabId = null;
     await startNextSource(run);
   }
@@ -391,7 +405,7 @@ async function beginSourceRun(payload, sender, sendResponse) {
   if (payload.currentSource === 'myNotes' && isNotesListUrl(originUrl)) notesUrl = originUrl;
   if (payload.currentSource === 'recordings' && isTranscriptPageUrl(originUrl)) recordingUrl = originUrl;
   const runId = 'sources-' + Date.now() + '-' + originTabId;
-  const run = { runId, originTabId, originUrl, rootFolder: datedBatchFolder(payload.settings?.downloadSubfolder), settings: payload.settings || {}, mode: payload.mode === 'page' ? 'page' : 'all', plan: createSourcePlan(selected), results: {}, scope: payload.scope || null, testLimit: Number.isInteger(payload.testLimit) ? Math.max(1, Math.min(payload.testLimit, 3)) : null, stopRequested: false, finished: false, workerTabId: null, workerStarted: false, recordingUrl, notesUrl };
+  const run = { runId, originTabId, originUrl, rootFolder: datedBatchFolder(payload.settings?.downloadSubfolder), settings: payload.settings || {}, mode: payload.mode === 'page' ? 'page' : 'all', plan: createSourcePlan(selected), results: {}, scope: payload.scope || null, testLimit: Number.isInteger(payload.testLimit) ? Math.max(1, Math.min(payload.testLimit, 3)) : null, stopRequested: false, finished: false, workerTabId: null, workerStarted: false, guided: payload.guidedWorkspace === true, recordingUrl, notesUrl };
   sourceRunsById.set(runId, run);
   sourceRunByOriginTab.set(originTabId, run);
   await persistRuns();
@@ -427,7 +441,7 @@ async function handleSourceWorkerResult(tabId, result) {
     return;
   }
   sourceRunByWorkerTab.delete(tabId);
-  await chrome.tabs.remove(tabId).catch(() => {});
+  await closeOwnedWorkerIfStillOnSource(run, tabId);
   run.workerTabId = null;
   run.workerStarted = false;
   await startNextSource(run);
@@ -455,9 +469,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 chrome.tabs.onRemoved.addListener(tabId => {
   if (tabId === guidedWorkspaceTabId) {
+    // Source tabs remain part of the guided workflow after its workspace closes.
+    // Do not restore legacy panels: that caused a flash/reappearance during worker cleanup.
     guidedWorkspaceTabId = null;
-    chrome.tabs.query({}).then(tabs => Promise.all(tabs.filter(t => t.url?.includes('.zoom.us/') && (t.url.includes('recording/meeting/transcript') || t.url.includes('/allNotes'))).map(t => chrome.tabs.sendMessage(t.id, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: false } }).catch(() => {})))).catch(() => {});
   }
+  guidedSourceTabIds.delete(tabId);
+  chrome.storage.session.set({ 'ztd:guided-source-tabs': [...guidedSourceTabIds] }).catch(() => {});
   for (const key of directNoteExports.keys()) if (key.startsWith(tabId + ':')) directNoteExports.delete(key);
   recoveryReady.then(async () => {
   const workerRun = sourceRunByWorkerTab.get(tabId);
@@ -519,6 +536,12 @@ function makeDataUrl(content, mime = 'text/plain;charset=utf-8') {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'zoomTranscriptExtension:guidedWorkspaceOpened') { guidedWorkspaceTabId = _sender?.tab?.id ?? null; sendResponse({ ok: true }); return false; }
+  if (message?.type === 'zoomTranscriptExtension:guidedSourceTab') {
+    recoveryReady.then(async () => { const id = message.payload?.tabId; if (Number.isInteger(id)) { guidedSourceTabIds.add(id); await chrome.storage.session.set({ 'ztd:guided-source-tabs': [...guidedSourceTabIds] }); } sendResponse({ ok: Number.isInteger(id) }); }).catch(() => sendResponse({ ok: false })); return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:getGuidedTabState') {
+    recoveryReady.then(() => sendResponse({ guided: guidedWorkspaceTabId != null || guidedSourceTabIds.has(_sender?.tab?.id) || sourceRunByWorkerTab.has(_sender?.tab?.id) })).catch(() => sendResponse({ guided: false })); return true;
+  }
   if (message?.type === 'zoomTranscriptExtension:startSourceRun') {
     beginSourceRun(message.payload || {}, _sender, sendResponse).catch(error => sendResponse({ ok: false, error: String(error) }));
     return true;

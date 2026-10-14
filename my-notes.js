@@ -428,5 +428,5 @@
     }
     if (message?.type === NS + ':stopSourceWorker') { stopRequested = true; cancelDirect?.(); sendResponse({ ok: true }); return false; }
   });
-  addPanel();
+  chrome.runtime.sendMessage({ type: NS + ':getGuidedTabState' }).then(state => { guidedWorkspace = state?.guided === true; if (!guidedWorkspace) addPanel(); }).catch(() => addPanel());
 })();

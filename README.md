@@ -30,6 +30,7 @@ Chrome Web Store direct listing: https://chrome.google.com/webstore/detail/lbmej
 - [Design notes](./design/README.md) and [decisions](./design/DESIGN_CHOICES.md)
 - [Testing and evidence limits](./TESTING.md)
 - [Release criteria](./RELEASE_CRITERIA.md)
+- [Roadmap and research backlog](./ROADMAP.md) (possible authenticated-context/tabless enhancement is not implemented)
 
 The printable PDFs are regenerated from the current guided-workflow HTML guides. Older screenshots may still show the former recordings-only UI; follow the current guides for the supported workflow.
 

@@ -49,6 +49,22 @@ let pendingRecordingMetadataScan = null;
 let sourceWorkerRun = null;
 let sourceRunRequested = false;
 let guidedWorkspace = false;
+let guidedStatusTimer = null;
+function showGuidedStatus(message, persistent = false) {
+  if (!guidedWorkspace) return;
+  let bubble = document.getElementById('ztd-guided-status');
+  if (!bubble) {
+    bubble = document.createElement('div'); bubble.id = 'ztd-guided-status'; bubble.setAttribute('role', 'status'); bubble.setAttribute('aria-live', 'polite');
+    document.body.appendChild(bubble);
+  }
+  bubble.textContent = String(message || 'Working'); bubble.hidden = false;
+  if (guidedStatusTimer) clearTimeout(guidedStatusTimer);
+  guidedStatusTimer = persistent ? null : setTimeout(() => { bubble.hidden = true; }, 4500);
+}
+function hideGuidedStatus() {
+  if (guidedStatusTimer) clearTimeout(guidedStatusTimer); guidedStatusTimer = null;
+  const bubble = document.getElementById('ztd-guided-status'); if (bubble) bubble.hidden = true;
+}
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -70,7 +86,7 @@ async function startCoordinatedSourceRun(mode, explicitSelected = null) {
   setSaveAllRunning(true);
   const activity = document.querySelector('#ztd-activity-note');
   if (activity) activity.textContent = 'Starting selected sources in an inactive worker tab.';
-  const response = await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:startSourceRun`, payload: { selected, settings, currentSource: 'recordings', mode, originUrl: location.href, scope: mode === 'page' ? { page: getPaginationState().currentPage, rowKeys: scanRows().map(row => row.key) } : null } });
+  const response = await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:startSourceRun`, payload: { selected, settings, currentSource: 'recordings', mode, guidedWorkspace: guidedWorkspace === true, originUrl: location.href, scope: mode === 'page' ? { page: getPaginationState().currentPage, rowKeys: scanRows().map(row => row.key) } : null } });
   if (!response?.ok) { sourceRunRequested = false; saveAllController.running = false; setSaveAllRunning(false); showToast(response?.error || 'Could not start the source batch.', 'error'); }
 }
 
@@ -1239,12 +1255,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
   if (message?.type === 'zoomTranscriptExtension:sourceRunProgress') {
+    if (message.payload?.guided === true) showGuidedStatus((message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes: ') + (message.payload?.message || message.payload?.state || 'Working'), true);
     chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedStatus', payload: { message: (message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes: ') + (message.payload?.message || message.payload?.state || 'Working') } }).catch(() => {});
     const activity = document.querySelector('#ztd-activity-note');
     if (activity) activity.textContent = (message.payload?.source === 'recordings' ? 'Recording transcripts: ' : 'My Notes transcripts: ') + (message.payload?.message || message.payload?.state || 'Working');
     return false;
   }
   if (message?.type === 'zoomTranscriptExtension:sourceRunFinished' || message?.type === 'zoomTranscriptExtension:sourceRunPaused') {
+    if (message.payload?.guided === true) { if (message.payload?.needsUserAction) showGuidedStatus('Action needed: ' + message.payload.needsUserAction.reason, true); else hideGuidedStatus(); }
     chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedFinished', payload: { message: message.payload?.needsUserAction ? 'Action needed: ' + message.payload.needsUserAction.reason : 'Downloads finished. Review saved, unavailable, failed, and pending totals for each source.', results: message.payload?.results } }).catch(() => {});
     sourceRunRequested = false;
     saveAllController.running = false;
@@ -1274,6 +1292,6 @@ const observer = new MutationObserver(() => {
 });
 observer.observe(document.documentElement, { childList: true, subtree: true });
 
-boot().catch(error => log('Initial boot failed', String(error)));
+chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:getGuidedTabState` }).then(state => { guidedWorkspace = state?.guided === true; return boot(); }).catch(() => boot()).catch(error => log('Initial boot failed', String(error)));
 
 })();
