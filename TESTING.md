@@ -12,7 +12,13 @@ Run from the repository root:
 	node --check --input-type=module < workspace.js
 	node --test tests/*.test.mjs
 
-The current 2026.10 baseline has 13 Node test files and 24 test cases. Tests are mocked Node/DOM/Chrome tests, not a full authenticated browser suite. Coverage includes guided inventory and exact matching, review and target guards, metadata-only scan boundaries, explicit terminal paging/authoritative totals, bounded readiness retry and Stop, metadata bridge allowlisting, source sequencing, export outcomes, and download routing.
+The 2026.10 repository currently has 17 Node test files and 29 test cases. Tests are mocked Node/DOM/Chrome tests, not a full authenticated browser suite. Coverage includes guided inventory and exact matching, review and target guards, metadata-only scan boundaries, explicit terminal paging/authoritative totals, bounded readiness retry and Stop, metadata bridge allowlisting, source sequencing, export outcomes, download routing, live guided-job presentation, tab ownership, and pacing.
+
+## Current pacing and guided status
+
+Recording transcript loops use an intentional 1500 ms inter-item gap. This is a configured pause, not a promise that each network download completes within 1.5 seconds. Route readiness, transcript response waits, loading timeouts, and server Retry-After/backoff are separate and unchanged. My Notes virtualization/tooltip readiness waits and rate-limit retry policy are also unchanged.
+
+The guided workspace shows a centered, high-contrast in-progress panel with live counts; its visual dimmer has pointer-events disabled so extension automation continues to work. Guided runs reuse eligible existing source tabs and only close extension-created worker tabs.
 
 ## What has and has not been verified
 

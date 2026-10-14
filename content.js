@@ -9,7 +9,9 @@ const PATTERN_HELP_MODAL_ID = 'ztd-pattern-help-modal';
 const ABOUT_MODAL_ID = 'ztd-about-modal';
 const ROW_SELECTOR = 'tr.zoom-virtual-table__row';
 const DOWNLOAD_BUTTON_SELECTOR = 'button[aria-label^="Download "]';
-const SAVE_ALL_DELAY_MS = 600;
+// Intentional inter-item pacing; readiness, response, and Retry-After waits remain separate.
+const SAVE_ALL_DELAY_MS = globalThis.ZTDPacing?.INTER_ITEM_DELAY_MS || 1500;
+const pauseBetweenItems = () => globalThis.ZTDPacing ? globalThis.ZTDPacing.wait(sleep) : sleep(SAVE_ALL_DELAY_MS);
 const TRANSITION_TIMEOUT_MS = 30000;
 
 const {
@@ -761,7 +763,7 @@ async function saveTranscriptRow(item, plannedEntry) {
   };
 
   if (saved?.ok) downloadManifest.push(entry);
-  if (sourceWorkerRun) chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:sourceWorkerProgress`, payload: { runId: sourceWorkerRun.runId, message: 'Saved ' + downloadManifest.length + ' recording transcript' + (downloadManifest.length === 1 ? '' : 's') + ' so far.' } }).catch(() => {});
+  if (sourceWorkerRun) chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:sourceWorkerProgress`, payload: { runId: sourceWorkerRun.runId, progress: { saved: downloadManifest.length, skipped: skippedUnavailable, failed: 0, pending: Number.isFinite(sourceWorkerRun.total) ? Math.max(0, sourceWorkerRun.total - downloadManifest.length - skippedUnavailable) : null }, message: 'Saved ' + downloadManifest.length + ' recording transcript' + (downloadManifest.length === 1 ? '' : 's') + ' so far.' } }).catch(() => {});
   updatePanelSummary();
   log('Saved transcript with final filename', entry);
 
@@ -811,7 +813,7 @@ async function saveVisiblePage(settingsNow) {
       targetFilename: plannedEntries[i]?.targetFilename || null,
     });
     try { results.push(await saveTranscriptRow(rowsNow[i], plannedEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); }
-    await sleep(SAVE_ALL_DELAY_MS);
+    await pauseBetweenItems();
   }
 
   return {
@@ -1070,7 +1072,7 @@ function renderPanel(rows, settings) {
               targetFilename: pageEntries[i]?.targetFilename || null,
             });
             try { results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); }
-            await sleep(SAVE_ALL_DELAY_MS);
+            await pauseBetweenItems();
           }
 
           if (sourceWorkerRun?.testLimit && results.length >= sourceWorkerRun.testLimit) break;
@@ -1263,7 +1265,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === 'zoomTranscriptExtension:sourceRunFinished' || message?.type === 'zoomTranscriptExtension:sourceRunPaused') {
     if (message.payload?.guided === true) { if (message.payload?.needsUserAction) showGuidedStatus('Action needed: ' + message.payload.needsUserAction.reason, true); else hideGuidedStatus(); }
-    chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedFinished', payload: { message: message.payload?.needsUserAction ? 'Action needed: ' + message.payload.needsUserAction.reason : 'Downloads finished. Review saved, unavailable, failed, and pending totals for each source.', results: message.payload?.results } }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedFinished', payload: { message: message.payload?.needsUserAction ? 'Action needed: ' + message.payload.needsUserAction.reason : 'Downloads finished. Review saved, unavailable, failed, and pending totals for each source.', results: message.payload?.results, needsUserAction: message.payload?.needsUserAction || null } }).catch(() => {});
     sourceRunRequested = false;
     saveAllController.running = false;
     setSaveAllRunning(false);

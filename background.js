@@ -17,6 +17,7 @@ const CONTENT_SCRIPT_FILES = [
   'lib/page.js',
   'lib/runtime.js',
   'lib/sources.js',
+  'lib/pacing.js',
   'content.js',
 ];
 const NOTES_CONTENT_FILES = ['lib/sources.js', 'my-notes.js'];
@@ -312,7 +313,7 @@ function sourceRunNotice(run, type, payload = {}) {
   chrome.tabs.sendMessage(run.originTabId, { type: 'zoomTranscriptExtension:' + type, payload: { runId: run.runId, guided: run.guided === true, ...payload } }).catch(() => {});
 }
 async function closeOwnedWorkerIfStillOnSource(run, tabId) {
-  if (typeof tabId !== 'number') return false;
+  if (typeof tabId !== 'number' || run.workerTabOwned !== true) return false;
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const stillOnSource = tab && (run.currentSource === 'recordings' ? isTranscriptPageUrl(tab.url) : isNotesListUrl(tab.url));
   if (!stillOnSource) return false;
@@ -344,7 +345,12 @@ async function startNextSource(run) {
   }
   sourceRunNotice(run, 'sourceRunProgress', { source, state: 'starting', message: 'Opening the ' + (source === 'recordings' ? 'recordings' : 'My Notes') + ' worker tab.' });
   try {
-    const tab = await chrome.tabs.create({ url: targetUrl, active: false, openerTabId: run.originTabId });
+    const origin = run.guided && source === 'recordings' ? await chrome.tabs.get(run.originTabId).catch(() => null) : null;
+    const tabs = run.guided ? await chrome.tabs.query({}) : [];
+    const reusableSource = source === 'recordings' ? origin : tabs.find(candidate => isNotesListUrl(candidate.url) && candidate.status === 'complete');
+    const reusable = run.guided && reusableSource && (source === 'recordings' ? reusableSource.id === run.originTabId : isNotesListUrl(reusableSource.url)) && reusableSource.status === 'complete';
+    const tab = reusable ? reusableSource : await chrome.tabs.create({ url: targetUrl, active: false, openerTabId: run.originTabId });
+    run.workerTabOwned = !reusable;
     run.workerTabId = tab.id;
     sourceRunByWorkerTab.set(tab.id, run);
     await persistRuns();
@@ -376,8 +382,8 @@ async function startSourceWorkerInTab(run, tabId, url) {
     const source = run.currentSource;
     const folderName = sourceFolderPath(run.rootFolder, source);
     const message = source === 'recordings'
-      ? { type: 'zoomTranscriptExtension:workerStartRecordings', payload: { runId: run.runId, mode: run.mode, folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope } }
-      : { type: 'zoomTranscriptExtension:workerStartMyNotes', payload: { runId: run.runId, mode: run.mode, folderName, folderPath: folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope } };
+      ? { type: 'zoomTranscriptExtension:workerStartRecordings', payload: { runId: run.runId, mode: run.mode, folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope, total: run.totals?.recordings } }
+      : { type: 'zoomTranscriptExtension:workerStartMyNotes', payload: { runId: run.runId, mode: run.mode, folderName, folderPath: folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope, total: run.totals?.myNotes } };
     await sendToReadyContentScript(tabId, url, message);
   } catch (error) {
     run.plan.complete(run.currentSource, { saved: 0, skipped: 0, failed: 1, error: 'Could not start the source worker: ' + String(error) });
@@ -405,7 +411,7 @@ async function beginSourceRun(payload, sender, sendResponse) {
   if (payload.currentSource === 'myNotes' && isNotesListUrl(originUrl)) notesUrl = originUrl;
   if (payload.currentSource === 'recordings' && isTranscriptPageUrl(originUrl)) recordingUrl = originUrl;
   const runId = 'sources-' + Date.now() + '-' + originTabId;
-  const run = { runId, originTabId, originUrl, rootFolder: datedBatchFolder(payload.settings?.downloadSubfolder), settings: payload.settings || {}, mode: payload.mode === 'page' ? 'page' : 'all', plan: createSourcePlan(selected), results: {}, scope: payload.scope || null, testLimit: Number.isInteger(payload.testLimit) ? Math.max(1, Math.min(payload.testLimit, 3)) : null, stopRequested: false, finished: false, workerTabId: null, workerStarted: false, guided: payload.guidedWorkspace === true, recordingUrl, notesUrl };
+  const run = { runId, originTabId, originUrl, rootFolder: datedBatchFolder(payload.settings?.downloadSubfolder), settings: payload.settings || {}, totals: payload.totals || {}, mode: payload.mode === 'page' ? 'page' : 'all', plan: createSourcePlan(selected), results: {}, scope: payload.scope || null, testLimit: Number.isInteger(payload.testLimit) ? Math.max(1, Math.min(payload.testLimit, 3)) : null, stopRequested: false, finished: false, workerTabId: null, workerStarted: false, guided: payload.guidedWorkspace === true, recordingUrl, notesUrl };
   sourceRunsById.set(runId, run);
   sourceRunByOriginTab.set(originTabId, run);
   await persistRuns();
@@ -540,7 +546,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     recoveryReady.then(async () => { const id = message.payload?.tabId; if (Number.isInteger(id)) { guidedSourceTabIds.add(id); await chrome.storage.session.set({ 'ztd:guided-source-tabs': [...guidedSourceTabIds] }); } sendResponse({ ok: Number.isInteger(id) }); }).catch(() => sendResponse({ ok: false })); return true;
   }
   if (message?.type === 'zoomTranscriptExtension:getGuidedTabState') {
-    recoveryReady.then(() => sendResponse({ guided: guidedWorkspaceTabId != null || guidedSourceTabIds.has(_sender?.tab?.id) || sourceRunByWorkerTab.has(_sender?.tab?.id) })).catch(() => sendResponse({ guided: false })); return true;
+    recoveryReady.then(async () => {
+      const tab = _sender?.tab;
+      const cached = guidedWorkspaceTabId != null || guidedSourceTabIds.has(tab?.id) || sourceRunByWorkerTab.has(tab?.id);
+      if (cached) { sendResponse({ guided: true }); return; }
+      // Runtime/session flags disappear when Chrome reloads the extension. While
+      // its guided workspace is open, recognize source pages from live tabs; do
+      // not persist a stale per-tab false/true marker.
+      const workspaceUrl = chrome.runtime.getURL('workspace.html');
+      const tabs = await chrome.tabs.query({});
+      const workspaceOpen = tabs.some(item => String(item.url || '').split(/[?#]/)[0] === workspaceUrl);
+      sendResponse({ guided: workspaceOpen && (isTranscriptPageUrl(tab?.url) || isNotesListUrl(tab?.url)) });
+    }).catch(() => sendResponse({ guided: false })); return true;
   }
   if (message?.type === 'zoomTranscriptExtension:startSourceRun') {
     beginSourceRun(message.payload || {}, _sender, sendResponse).catch(error => sendResponse({ ok: false, error: String(error) }));
@@ -559,7 +576,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           run.notesProgress = Object.fromEntries(['saved', 'skipped', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, Math.max(0, Number(progress[key]) || 0)]));
           await persistRuns();
         }
-        sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'running', message: message.payload?.message || 'Working' });
+        sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'running', message: message.payload?.message || 'Working', progress: message.payload?.progress || null });
       }
       sendResponse({ ok: !!run });
     }).catch(() => sendResponse({ ok: false }));

@@ -41,6 +41,7 @@
         "lib/page.js",
         "lib/runtime.js",
         "lib/sources.js",
+        "lib/pacing.js",
         "content.js"
       ],
       "css": [
