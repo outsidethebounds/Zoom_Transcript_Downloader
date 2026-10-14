@@ -10,13 +10,13 @@ function createPacer() {
   return context.globalThis.ZTDPacing;
 }
 
-test('fast prior item gets only the remainder of the 1500ms start interval', async () => {
+test('fast prior item gets only the remainder of the 900ms start interval', async () => {
   const pacer = createPacer();
   let now = 1000;
   const waits = [];
   const started = await pacer.waitForNextStart(900, () => now, async ms => { waits.push(ms); now += ms; });
-  assert.deepEqual(waits, [1400]);
-  assert.equal(started - 900, 1500);
+  assert.deepEqual(waits, [800]);
+  assert.equal(started - 900, 900);
 });
 
 test('slow item consumes the interval with no extra artificial wait', async () => {

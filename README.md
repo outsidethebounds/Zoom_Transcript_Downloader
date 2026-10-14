@@ -2,7 +2,7 @@
 
 Zoom Transcript Downloader is a Chrome and Microsoft Edge extension for saving transcript files available to the signed-in Zoom user.
 
-## Current primary workflow (2026.10)
+## Current primary workflow (2026.10.1)
 
 1. Install the extension. The extension-owned guided workspace opens on first install; later open it from the toolbar button.
 2. Enter your organization's Zoom subdomain and choose Recording transcripts and/or My Notes transcripts.

@@ -48,6 +48,10 @@
 #ztd-notes-panel #ztd-notes-status { margin: 8px 0; color: #475569; }
 #ztd-notes-panel pre { max-height: 200px; overflow: auto; white-space: pre-wrap; border: 1px solid #d8e1ec; border-radius: 10px; padding: 8px; background: white; color: #334155; }
 
+/* ID-based panel layout rules override the browser default [hidden] rule. */
+#ztd-panel[hidden],
+#ztd-notes-panel[hidden] { display: none !important; }
+
 #ztd-guided-status {
   position: fixed; top: 24px; left: 50%; transform: translateX(-50%); z-index: 2147483647;
   max-width: min(560px, calc(100vw - 32px)); box-sizing: border-box; padding: 10px 16px;

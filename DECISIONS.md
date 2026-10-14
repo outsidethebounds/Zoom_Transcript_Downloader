@@ -1,6 +1,6 @@
 # Decisions
 
-## Current workflow decisions (2026.10; authoritative for current product)
+## Current workflow decisions (2026.10.1; authoritative for current product)
 
 - The extension-owned guided workspace is the primary user entry; the older injected panel and its Save all / Save page actions are legacy/advanced fallback.
 - Discovery scans accessible metadata from both Recording transcripts and My Notes; it does not export transcript bodies. Both scans must be complete and reviewed before explicit selected-source export.
@@ -8,7 +8,7 @@
 - Exact verified shared occurrence identifiers alone produce reciprocal cross-source badges. Missing association and unknown availability remain distinct; do not invent a unique count.
 - Stop prevents subsequent exports; completed files are preserved. Do not promise automatic resume or asset-level selection.
 - Files use a dated root with source-separated folders under Downloads. My Notes means transcript files only.
-- Current evidence is 13 mocked Node test files / 24 cases, not fresh SSO-to-export acceptance. Native-wheel scroll behavior remains unconfirmed.
+- Version 2026.10.1 has 20 mocked Node test files / 54 cases. The live hidden-panel regression was verified after reload; metadata scan paused at My Notes sign-in/readiness with no downloads. A mocked pending count of 13 does not resolve a live 13-asset discrepancy. Live Stop-during-export, fresh SSO-to-export, and native-wheel acceptance remain unverified.
 
 The numbered decisions below are preserved historical records. Where they describe the injected recordings panel, Save all, Save page, or 2026.09 behavior, they apply only to that older surface and are superseded for the primary guided workflow by the decisions above.
 

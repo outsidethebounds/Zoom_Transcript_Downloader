@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import sources from '../lib/sources.js';
 const code = fs.readFileSync(new URL('../my-notes.js', import.meta.url), 'utf8')
-  .replace("  chrome.runtime.sendMessage({ type: NS + ':getGuidedTabState' }).then(state => { guidedWorkspace = state?.guided === true; if (!guidedWorkspace) addPanel(); }).catch(() => addPanel());\n})();", '  globalThis.adapter = { processNotes, readRows, findRowForLabel, clickTranscriptDownload, waitForDom };\n})();');
+  .replace("  const initialGuidedWorkspaceStateVersion = guidedWorkspaceStateVersion;\n  chrome.runtime.sendMessage({ type: NS + ':getGuidedTabState' }).then(state => { if (shouldApplyInitialGuidedTabState(initialGuidedWorkspaceStateVersion)) guidedWorkspace = state?.guided === true; if (!guidedWorkspace) addPanel(); }).catch(() => { if (!guidedWorkspace) addPanel(); });\n})();", '  globalThis.adapter = { processNotes, readRows, findRowForLabel, clickTranscriptDownload, waitForDom };\n})();');
 async function run({ stopAfter = 0, missing = false, scope = null, stopAccessIndex = -1, loginAccessIndex = -1, routeFailureIndex = -1, allAccessible = false, direct = false, directKind = 'ready', stopDirect = false, expireOnce = false, expireAlways = false, lateDirect = false } = {}) {
   let directRequests = 0, directSaves = 0;
   let clock = 0, detail = null, count = 20, armed = null, saved = 0, root;

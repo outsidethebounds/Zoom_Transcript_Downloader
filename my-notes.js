@@ -13,6 +13,8 @@
   let activeWorker = false;
   let activeWorkerRunId = null;
   let guidedWorkspace = false;
+  let guidedWorkspaceStateVersion = 0;
+  function shouldApplyInitialGuidedTabState(versionAtRequest) { return guidedWorkspaceStateVersion === versionAtRequest; }
   let panel;
   function setBusy(busy) { for (const id of ['ztd-notes-selected', 'ztd-notes-page']) { const b = panel?.querySelector('#' + id); if (b) b.disabled = busy; } }
   let pendingExportId = null;
@@ -250,6 +252,10 @@
     }
     return null;
   }
+  function notesPending(config, result) {
+    const total = Number.isFinite(config.total) ? config.total : result.discovered;
+    return Math.max(0, total - result.saved - result.skipped - result.failed);
+  }
   async function processNotes(config) {
     stopRequested = config.stopRequested === true;
     activeWorker = true;
@@ -268,7 +274,7 @@
       const discoveredRows = config.scope?.notes || (config.scope?.labels ? config.scope.labels.map(label => ({ ...sourcesApi.parseNoteListLabel(label), label })) : await collectNotes(allPages));
       const rows = config.testLimit ? discoveredRows.slice(0, config.testLimit) : discoveredRows;
       result.discovered = rows.length;
-      await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result }, message: 'Discovered ' + rows.length + ' notes; checking transcript access.' });
+      await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: notesPending(config, result) }, message: 'Discovered ' + rows.length + ' notes; checking transcript access.' });
       // Plan filenames from every discovered item, before access filtering.
       // Unknown permission metadata is not a denial; export/UI decides access.
       const planned = new Map();
@@ -292,7 +298,7 @@
             if (direct.kind === 'saved') { result.saved += 1; result.directSaved += 1; result.eligible += 1; }
             else if (direct.kind === 'inaccessible') { result.skipped += 1; const reason = 'Export denied or transcript unavailable (HTTP ' + direct.status + ').'; result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1; }
             else { result.failed += 1; result.error = direct.kind === 'rateLimit' ? 'Zoom rate limit reached; stopped after bounded Retry-After retries. Retry My Notes only later.' : 'Authenticated My Notes export failed; stopped to avoid duplicate or misattributed downloads. Retry My Notes only.'; break; }
-            await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: Math.max(0, result.discovered - result.saved - result.skipped - result.failed) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
+            await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: notesPending(config, result) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
             continue;
           }
         }
@@ -403,7 +409,7 @@
     return panel;
   }
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === NS + ':setGuidedWorkspace') { guidedWorkspace = message.payload?.active === true; if (panel) panel.hidden = guidedWorkspace; sendResponse({ ok: true }); return false; }
+    if (message?.type === NS + ':setGuidedWorkspace') { guidedWorkspaceStateVersion += 1; guidedWorkspace = message.payload?.active === true; if (panel) panel.hidden = guidedWorkspace; sendResponse({ ok: true }); return false; }
     if (message?.type === NS + ':ping') { sendResponse({ ok: true }); return false; }
     if (message?.type === NS + ':getSourceWorkerState') { sendResponse({ runId: activeWorkerRunId, active: activeWorker }); return false; }
     if (message?.type === NS + ':openPanel') { addPanel(); sendResponse({ ok: true }); return false; }
@@ -432,5 +438,6 @@
     }
     if (message?.type === NS + ':stopSourceWorker') { stopRequested = true; cancelDirect?.(); sendResponse({ ok: true }); return false; }
   });
-  chrome.runtime.sendMessage({ type: NS + ':getGuidedTabState' }).then(state => { guidedWorkspace = state?.guided === true; if (!guidedWorkspace) addPanel(); }).catch(() => addPanel());
+  const initialGuidedWorkspaceStateVersion = guidedWorkspaceStateVersion;
+  chrome.runtime.sendMessage({ type: NS + ':getGuidedTabState' }).then(state => { if (shouldApplyInitialGuidedTabState(initialGuidedWorkspaceStateVersion)) guidedWorkspace = state?.guided === true; if (!guidedWorkspace) addPanel(); }).catch(() => { if (!guidedWorkspace) addPanel(); });
 })();

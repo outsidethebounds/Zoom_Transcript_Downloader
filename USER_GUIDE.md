@@ -1,6 +1,6 @@
 # Zoom Transcript Downloader User Guide
 
-Version: 2026.10 (guided workspace baseline)
+Version: 2026.10.1 (guided workspace)
 
 ## What it does
 
@@ -69,7 +69,7 @@ The older in-page panel remains on supported Zoom transcript pages as a manual/a
 
 ## Validation and limitations
 
-The 2026.10 baseline has 13 Node test files and 24 test cases, including guided inventory, paging boundaries, readiness/retry, metadata-bridge privacy, and export-flow mocks. These do not constitute a full live-browser acceptance test. Metadata inventory and custom scroll rails have been checked live; native-wheel rail behavior and a fresh SSO-to-export acceptance run are not established. Do not infer complete production acceptance from test counts or screenshots.
+The 2026.10.1 source commit has 20 Node test files and 54 mocked cases; these are not full live-browser acceptance. A live metadata-only check confirmed legacy panels remain hidden on both source tabs after reload and a My Notes panel remount. Recording metadata discovery returned 60 assets, but My Notes waited for Zoom sign-in/page readiness; the scan stopped before review/export with no downloads. A mocked 13-item pending result is not a resolved live 13-asset discrepancy. Live Stop-during-export, fresh SSO-to-export, and native-wheel rail acceptance remain unverified. Do not infer complete production acceptance from screenshots or test counts.
 
 Older screenshots and printable PDFs may depict the former recordings-only/legacy panel. This current guide and README describe the guided workflow.
 

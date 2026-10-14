@@ -308,6 +308,9 @@ function datedBatchFolder(subfolder = '') {
 function sourceFolderPath(root, source) {
   return root + '/' + (source === 'recordings' ? 'Recordings' : 'My Notes');
 }
+function sanitizeSourceWorkerProgress(progress) {
+  return Object.fromEntries(['saved', 'skipped', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, progress[key] == null ? null : Math.max(0, Number(progress[key]) || 0)]));
+}
 function sourceRunNotice(run, type, payload = {}) {
   if (typeof run.originTabId !== 'number') return;
   chrome.tabs.sendMessage(run.originTabId, { type: 'zoomTranscriptExtension:' + type, payload: { runId: run.runId, guided: run.guided === true, ...payload } }).catch(() => {});
@@ -446,11 +449,22 @@ async function stopSourceRun(originTabId) {
   if (run.workerTabId) chrome.tabs.sendMessage(run.workerTabId, { type: 'zoomTranscriptExtension:stopSourceWorker' }).catch(() => {});
   else await finishSourceRun(run, { stopped: true });
 }
+function normalizeSourceWorkerResult(run, source, result = {}) {
+  const normalized = { ...result };
+  const total = Number(run?.totals?.[source]);
+  if (Number.isFinite(total)) {
+    const accounted = Math.max(0, Number(normalized.saved) || 0) + Math.max(0, Number(normalized.skipped) || 0) + Math.max(0, Number(normalized.failed) || 0);
+    const minimumPending = Math.max(0, total - accounted);
+    if (!Number.isFinite(normalized.pending) || normalized.pending < minimumPending) normalized.pending = minimumPending;
+  }
+  return normalized;
+}
 async function handleSourceWorkerResult(tabId, result) {
   await recoveryReady;
   const run = sourceRunByWorkerTab.get(tabId);
   if (!run || run.finished || result?.runId !== run.runId || result?.source !== run.currentSource) return;
-  run.plan.complete(run.currentSource, result || {});
+  result = normalizeSourceWorkerResult(run, run.currentSource, result || {});
+  run.plan.complete(run.currentSource, result);
   run.results = run.plan.results;
   sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, result: run.results[run.currentSource], state: 'complete' });
   const userAction = result?.needsUserAction;
@@ -605,7 +619,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (run && message.payload?.runId === run.runId) {
         if (message.payload?.progress) {
           const progress = message.payload.progress;
-          const sanitized = Object.fromEntries(['saved', 'skipped', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, progress[key] == null ? null : Math.max(0, Number(progress[key]) || 0)]));
+          const sanitized = sanitizeSourceWorkerProgress(progress);
           if (run.currentSource === 'myNotes') run.notesProgress = sanitized; else if (run.currentSource === 'recordings') run.recordingsProgress = sanitized;
           await persistRuns();
         }
