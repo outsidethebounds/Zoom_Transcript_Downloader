@@ -11,6 +11,7 @@
   let stopRequested = false;
   let guidedNotesScanStopped = false;
   let activeWorker = false;
+  let activeWorkerRunId = null;
   let guidedWorkspace = false;
   let panel;
   function setBusy(busy) { for (const id of ['ztd-notes-selected', 'ztd-notes-page']) { const b = panel?.querySelector('#' + id); if (b) b.disabled = busy; } }
@@ -252,6 +253,7 @@
   async function processNotes(config) {
     stopRequested = config.stopRequested === true;
     activeWorker = true;
+    activeWorkerRunId = config.runId || null;
     const result = { runId: config.runId, source: 'myNotes', saved: 0, skipped: 0, failed: 0, stopped: false, needsUserAction: null, processed: 0, discovered: 0, eligible: 0, directSaved: 0, fallbackSaved: 0, pending: 0, skipReasons: {} };
     let entries = [];
     const visited = new Set();
@@ -357,8 +359,9 @@
       if (pendingExportId) { await say('clearMyNotesExport', { exportId: pendingExportId }).catch(() => {}); pendingExportId = null; }
       result.pending = Math.max(0, result.discovered - result.saved - result.skipped - result.failed);
       result.stopped = result.stopped || stopRequested;
-      activeWorker = false;
       if (config.worker) await say('sourceWorkerCompleted', result);
+      activeWorker = false;
+      activeWorkerRunId = null;
       status(result.stopped ? 'Stopped.' : 'My Notes batch finished.');
       updateResults({ myNotes: result });
     }
@@ -402,6 +405,7 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === NS + ':setGuidedWorkspace') { guidedWorkspace = message.payload?.active === true; if (panel) panel.hidden = guidedWorkspace; sendResponse({ ok: true }); return false; }
     if (message?.type === NS + ':ping') { sendResponse({ ok: true }); return false; }
+    if (message?.type === NS + ':getSourceWorkerState') { sendResponse({ runId: activeWorkerRunId, active: activeWorker }); return false; }
     if (message?.type === NS + ':openPanel') { addPanel(); sendResponse({ ok: true }); return false; }
     if (message?.type === NS + ':scanGuidedNotes') {
       scanGuidedNotes().then(sendResponse).catch(error => sendResponse({ ok: false, error: String(error) }));

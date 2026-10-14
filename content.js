@@ -1245,6 +1245,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+  if (message?.type === 'zoomTranscriptExtension:getSourceWorkerState') {
+    sendResponse({ runId: sourceWorkerRun?.runId || currentRunId || null, active: sourceRunRequested === true || saveAllController.running === true });
+    return false;
+  }
   if (message?.type === 'zoomTranscriptExtension:workerStartRecordings') {
     sourceWorkerRun = message.payload || {};
     currentRunId = sourceWorkerRun.runId || ('worker-' + Date.now());

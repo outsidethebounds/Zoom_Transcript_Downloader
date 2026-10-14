@@ -140,4 +140,40 @@ const tick=()=>new Promise(r=>setImmediate(r));
  assert.deepEqual(f.removed,[],'cleanup must not close an extension-created worker tab after user navigation');
  assert.equal(f.session['ztd:source-runs'].length,0,'a terminal result still completes coordinator state');
 }
+{
+ const f=fixture();await f.run('recoveryReady');
+ f.ctx.payload={selected:['recordings'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{},guidedWorkspace:true};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
+ const runId=f.session['ztd:source-runs'][0].runId;
+ f.chrome.tabs.sendMessage=async(_id,message)=>message.type.endsWith('getSourceWorkerState')?{runId,active:true}:{ok:true};
+ const stateHandler=f.chrome.runtime.onMessage.listeners[0];let response;
+ await new Promise(resolve=>stateHandler({type:'zoomTranscriptExtension:getGuidedRunState'},{tab:{id:900}},value=>{response=value;resolve()}));
+ assert.equal(response.active.active,true,'a live worker is preserved through workspace hydration');
+ assert.equal(response.active.runId,runId);
+ assert.equal(f.session['ztd:source-runs'].length,1,'active work is not cleared or restarted');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ f.ctx.payload={selected:['recordings'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{},guidedWorkspace:true};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
+ const runId=f.session['ztd:source-runs'][0].runId;
+ f.chrome.tabs.get=async()=>null;
+ let response;const handler=f.chrome.runtime.onMessage.listeners[0];
+ await new Promise(resolve=>handler({type:'zoomTranscriptExtension:getGuidedRunState'},{tab:{id:900}},value=>{response=value;resolve()}));
+ assert.equal(response.active,null);assert.equal(response.terminal.interrupted,true,'a proven missing worker becomes an interrupted terminal result');
+ assert.equal(response.terminal.results.recordings,undefined,'no unobserved asset counts are invented');
+ assert.equal(f.session['ztd:source-runs'].length,0);assert.equal(f.created.length,1,'interrupted jobs are not resumed');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ const run={runId:'safe-terminal',originTabId:1,originUrl:'https://zoom.us/recording/meeting/transcript',rootFolder:'safe',settings:{},totals:{},mode:'all',plan:createSourcePlan(['myNotes']),results:{myNotes:{saved:2,skipped:1,failed:0,pending:3,error:'private url must not persist'}},currentSource:'myNotes',guided:true,finished:false,workerTabId:null};
+ f.ctx.terminalRun=run;await f.run('finishSourceRun(terminalRun)');
+ assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:last-guided-terminal'].results.myNotes)),{saved:2,skipped:1,failed:0,pending:3,error:true});
+ assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private url'),false,'terminal journal contains counts and error flags only');
+ let response;const handler=f.chrome.runtime.onMessage.listeners[0];
+ await new Promise(resolve=>handler({type:'zoomTranscriptExtension:getGuidedRunState'},{tab:{id:900}},value=>{response=value;resolve()}));
+ assert.equal(response.terminal.runId,'safe-terminal','missed terminal outcomes replay on workspace hydration');
+ await new Promise(resolve=>handler({type:'zoomTranscriptExtension:ackGuidedTerminal',payload:{runId:'safe-terminal'}},{tab:{id:900}},resolve));
+ assert.equal(f.session['ztd:last-guided-terminal'],undefined,'replayed terminal is acknowledged once');
+}
 console.log('coordinator.test.mjs: all tests passed');

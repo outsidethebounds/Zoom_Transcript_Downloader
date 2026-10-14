@@ -323,12 +323,21 @@ async function closeOwnedWorkerIfStillOnSource(run, tabId) {
 async function finishSourceRun(run, extra = {}) {
   if (run.finished) return;
   run.finished = true;
+  if (run.guided) {
+    const rawResults = { ...(run.results || {}) };
+    if (extra.interrupted && run.currentSource && !rawResults[run.currentSource] && run.notesProgress) rawResults[run.currentSource] = run.notesProgress;
+    const results = Object.fromEntries(Object.entries(rawResults).map(([source, result]) => [source, {
+      saved: Math.max(0, Number(result?.saved) || 0), skipped: Math.max(0, Number(result?.skipped) || 0),
+      failed: Math.max(0, Number(result?.failed) || 0), pending: Math.max(0, Number(result?.pending) || 0), error: Boolean(result?.error),
+    }]));
+    await chrome.storage.session.set({ 'ztd:last-guided-terminal': { runId: run.runId, results, interrupted: extra.interrupted === true, stopped: extra.stopped === true, needsUserAction: Boolean(extra.needsUserAction), completedAt: Date.now() } }).catch(() => {});
+  }
   if (run.workerTabId) sourceRunByWorkerTab.delete(run.workerTabId);
   if (run.workerTabId && !extra.keepWorker) await closeOwnedWorkerIfStillOnSource(run, run.workerTabId);
   sourceRunByOriginTab.delete(run.originTabId);
   sourceRunsById.delete(run.runId);
   await persistRuns();
-  sourceRunNotice(run, 'sourceRunFinished', { results: run.results, folderName: run.rootFolder, ...extra });
+  sourceRunNotice(run, extra.needsUserAction ? 'sourceRunPaused' : 'sourceRunFinished', { results: run.results, folderName: run.rootFolder, ...extra });
 }
 async function startNextSource(run) {
   if (run.finished) return;
@@ -437,12 +446,7 @@ async function handleSourceWorkerResult(tabId, result) {
   sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, result: run.results[run.currentSource], state: 'complete' });
   const userAction = result?.needsUserAction;
   if (userAction) {
-    run.finished = true;
-    sourceRunByOriginTab.delete(run.originTabId);
-    sourceRunsById.delete(run.runId);
-    sourceRunByWorkerTab.delete(tabId);
-    await persistRuns();
-    sourceRunNotice(run, 'sourceRunPaused', { results: run.results, folderName: run.rootFolder, needsUserAction: userAction, workerTabId: tabId });
+    await finishSourceRun(run, { needsUserAction: userAction, keepWorker: true, workerTabId: tabId });
     await chrome.tabs.update(tabId, { active: true }).catch(() => {});
     return;
   }
@@ -542,6 +546,25 @@ function makeDataUrl(content, mime = 'text/plain;charset=utf-8') {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'zoomTranscriptExtension:guidedWorkspaceOpened') { guidedWorkspaceTabId = _sender?.tab?.id ?? null; sendResponse({ ok: true }); return false; }
+  if (message?.type === 'zoomTranscriptExtension:getGuidedRunState') {
+    recoveryReady.then(async () => {
+      const run = [...sourceRunsById.values()].find(item => item.guided && !item.finished);
+      if (!run) { const stored = await chrome.storage.session.get('ztd:last-guided-terminal'); sendResponse({ active: null, terminal: stored['ztd:last-guided-terminal'] || null }); return; }
+      if (!Number.isInteger(run.workerTabId)) { sendResponse({ active: { runId: run.runId, source: run.currentSource, starting: true }, terminal: null }); return; }
+      const tab = await chrome.tabs.get(run.workerTabId).catch(() => null);
+      if (!tab) { await finishSourceRun(run, { interrupted: true }); const stored = await chrome.storage.session.get('ztd:last-guided-terminal'); sendResponse({ active: null, terminal: stored['ztd:last-guided-terminal'] || null }); return; }
+      if (tab.status !== 'complete') { sendResponse({ active: { runId: run.runId, source: run.currentSource, unverified: true }, terminal: null }); return; }
+      const worker = await chrome.tabs.sendMessage(run.workerTabId, { type: 'zoomTranscriptExtension:getSourceWorkerState' }).catch(() => null);
+      if (worker?.runId === run.runId && worker.active === true) { sendResponse({ active: { runId: run.runId, source: run.currentSource, active: true, progress: run.notesProgress || null }, terminal: null }); return; }
+      if (!worker) { sendResponse({ active: { runId: run.runId, source: run.currentSource, unverified: true }, terminal: null }); return; }
+      await finishSourceRun(run, { interrupted: true }); const stored = await chrome.storage.session.get('ztd:last-guided-terminal'); sendResponse({ active: null, terminal: stored['ztd:last-guided-terminal'] || null });
+    }).catch(() => sendResponse({ active: null, terminal: null, unavailable: true }));
+    return true;
+  }
+  if (message?.type === 'zoomTranscriptExtension:ackGuidedTerminal') {
+    chrome.storage.session.get('ztd:last-guided-terminal').then(async stored => { const terminal = stored['ztd:last-guided-terminal']; if (terminal?.runId === message.payload?.runId) await chrome.storage.session.remove('ztd:last-guided-terminal'); sendResponse({ ok: terminal?.runId === message.payload?.runId }); }).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   if (message?.type === 'zoomTranscriptExtension:guidedSourceTab') {
     recoveryReady.then(async () => { const id = message.payload?.tabId; if (Number.isInteger(id)) { guidedSourceTabIds.add(id); await chrome.storage.session.set({ 'ztd:guided-source-tabs': [...guidedSourceTabIds] }); } sendResponse({ ok: Number.isInteger(id) }); }).catch(() => sendResponse({ ok: false })); return true;
   }
