@@ -11,7 +11,13 @@ const ROW_SELECTOR = 'tr.zoom-virtual-table__row';
 const DOWNLOAD_BUTTON_SELECTOR = 'button[aria-label^="Download "]';
 // Intentional inter-item pacing; readiness, response, and Retry-After waits remain separate.
 const SAVE_ALL_DELAY_MS = globalThis.ZTDPacing?.INTER_ITEM_DELAY_MS || 1500;
-const pauseBetweenItems = () => globalThis.ZTDPacing ? globalThis.ZTDPacing.wait(sleep) : sleep(SAVE_ALL_DELAY_MS);
+async function waitForNextRecordingStart(previousStartMs) {
+  if (previousStartMs === null) return Date.now();
+  if (globalThis.ZTDPacing) return await globalThis.ZTDPacing.waitForNextStart(previousStartMs, Date.now, sleep);
+  const remaining = Math.max(0, SAVE_ALL_DELAY_MS - Math.max(0, Date.now() - previousStartMs));
+  if (remaining > 0) await sleep(remaining);
+  return Date.now();
+}
 const TRANSITION_TIMEOUT_MS = 30000;
 
 const {
@@ -793,6 +799,7 @@ async function saveVisiblePage(settingsNow) {
   );
 
   const results = [];
+  let previousItemStartMs = null;
   for (let i = 0; i < rowsNow.length; i++) {
     if (sourceWorkerRun?.testLimit && results.length >= sourceWorkerRun.testLimit) break;
     if (saveAllController.stopRequested) {
@@ -812,8 +819,8 @@ async function saveVisiblePage(settingsNow) {
       title: rowsNow[i].meta?.title || '',
       targetFilename: plannedEntries[i]?.targetFilename || null,
     });
+    previousItemStartMs = await waitForNextRecordingStart(previousItemStartMs);
     try { results.push(await saveTranscriptRow(rowsNow[i], plannedEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); }
-    await pauseBetweenItems();
   }
 
   return {
@@ -1013,6 +1020,7 @@ function renderPanel(rows, settings) {
           pagesVisited,
         });
 
+        let previousItemStartMs = null;
         while (true) {
           const allRowsNow = scanRows();
           const rowsNow = allRowsNow.filter(r => r.hasDownload);
@@ -1071,8 +1079,8 @@ function renderPanel(rows, settings) {
               title: rowsNow[i].meta?.title || '',
               targetFilename: pageEntries[i]?.targetFilename || null,
             });
+            previousItemStartMs = await waitForNextRecordingStart(previousItemStartMs);
             try { results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); }
-            await pauseBetweenItems();
           }
 
           if (sourceWorkerRun?.testLimit && results.length >= sourceWorkerRun.testLimit) break;

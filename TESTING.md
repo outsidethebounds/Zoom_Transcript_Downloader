@@ -12,11 +12,11 @@ Run from the repository root:
 	node --check --input-type=module < workspace.js
 	node --test tests/*.test.mjs
 
-The 2026.10 repository currently has 17 Node test files and 29 test cases. Tests are mocked Node/DOM/Chrome tests, not a full authenticated browser suite. Coverage includes guided inventory and exact matching, review and target guards, metadata-only scan boundaries, explicit terminal paging/authoritative totals, bounded readiness retry and Stop, metadata bridge allowlisting, source sequencing, export outcomes, download routing, live guided-job presentation, tab ownership, and pacing.
+The 2026.10 repository currently has 18 Node test files and 32 test cases. Tests are mocked Node/DOM/Chrome tests, not a full authenticated browser suite. Coverage includes guided inventory and exact matching, review and target guards, metadata-only scan boundaries, explicit terminal paging/authoritative totals, bounded readiness retry and Stop, metadata bridge allowlisting, source sequencing, export outcomes, download routing, live guided-job presentation, tab ownership, and pacing.
 
 ## Current pacing and guided status
 
-Recording transcript loops use an intentional 1500 ms inter-item gap. This is a configured pause, not a promise that each network download completes within 1.5 seconds. Route readiness, transcript response waits, loading timeouts, and server Retry-After/backoff are separate and unchanged. My Notes virtualization/tooltip readiness waits and rate-limit retry policy are also unchanged.
+Recording transcript loops enforce a minimum 1500 ms start-to-start interval. Time already spent awaiting the prior transcript response and Chrome download completion counts toward that interval, so no extra fixed pause is added afterward when work took 1500 ms or longer. This is pacing behavior, not a guarantee that each download completes within 1.5 seconds or that network latency improves. Route readiness, transcript response waits, loading timeouts, and server Retry-After/backoff are separate and unchanged; processing remains serial. My Notes virtualization/tooltip readiness waits and rate-limit retry policy are also unchanged.
 
 The guided workspace shows a centered, high-contrast in-progress panel with live counts; its visual dimmer has pointer-events disabled so extension automation continues to work. Guided runs reuse eligible existing source tabs and only close extension-created worker tabs.
 
