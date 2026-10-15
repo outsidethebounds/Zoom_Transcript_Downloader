@@ -1,6 +1,7 @@
 import { createDownloadSuppression } from './lib/download-suppression.mjs';
 import { createSourcePlan, orderSources } from './lib/source-plan.mjs';
 import { sendWhenContentReady } from './lib/content-readiness.mjs';
+import { datedBatchFolder, sourceFolderPath } from './lib/download-settings.mjs';
 
 const BASE_DEFAULTS = {
   filenamePattern: '{date} - {time} - {title}',
@@ -296,18 +297,6 @@ async function sendToReadyContentScript(tabId, url, message) {
   });
 }
 
-function sanitizeSubfolder(path = '') {
-  return String(path).split(/[\\/]+/).map(part => part.trim()).filter(part => part && part !== '.' && part !== '..').map(part => part.replace(/[<>:"\\|?*\x00-\x1F]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[ .]+$/g, '')).filter(Boolean).join('/');
-}
-function datedBatchFolder(subfolder = '') {
-  const d = new Date();
-  const name = 'ZoomTranscripts-' + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + d.getFullYear();
-  const prefix = sanitizeSubfolder(subfolder);
-  return prefix ? prefix + '/' + name : name;
-}
-function sourceFolderPath(root, source) {
-  return root + '/' + (source === 'recordings' ? 'Recordings' : 'My Notes');
-}
 function sanitizeSourceWorkerProgress(progress) {
   return Object.fromEntries(['saved', 'skipped', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, progress[key] == null ? null : Math.max(0, Number(progress[key]) || 0)]));
 }

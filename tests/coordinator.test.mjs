@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { createSourcePlan, orderSources } from '../lib/source-plan.mjs';
 import { sendWhenContentReady } from '../lib/content-readiness.mjs';
 import { createDownloadSuppression, shouldSuppressNativeTranscriptDownload } from '../lib/download-suppression.mjs';
+import { datedBatchFolder, sourceFolderPath } from '../lib/download-settings.mjs';
 const script = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8').replace(/^import .*;\n/gm, '');
 const event = () => ({ listeners: [], addListener(f) { this.listeners.push(f); } });
 const store = data => ({ async get(keys) { if (keys == null) return {...data}; if (typeof keys === 'string') return {[keys]: data[keys]}; return Object.fromEntries(Object.entries(keys).map(([k,v])=>[k,data[k]??v])); }, async set(v) { Object.assign(data,v); }, async remove(k) { delete data[k]; } });
@@ -17,7 +18,7 @@ function fixture(session = {}) {
     tabs:{onUpdated:event(),onRemoved:event(),onActivated:event(),query:async()=>[],create:async opts=>{const t={id:tabId++,status:'complete',url:opts.url};created.push({...t,...opts});return t;},get:async id=>created.find(t=>t.id===id),remove:async id=>removed.push(id),update:async()=>{},sendMessage:async(id,message)=>{sent.push({id,...message});return {ok:true};}},
     downloads:{onCreated:event(),onChanged:event(),onDeterminingFilename:event(),cancel:async()=>{},removeFile:async()=>{},erase:async()=>{},download:async()=>1,search:async()=>[{state:'complete',fileSize:10}]},
   };
-  const ctx=vm.createContext({chrome,createSourcePlan,orderSources,sendWhenContentReady,createDownloadSuppression,shouldSuppressNativeTranscriptDownload,Map,Promise,Date,URL,crypto,TextEncoder,Uint8Array,btoa,unescape,encodeURIComponent,console,setTimeout}); vm.runInContext(script,ctx);
+  const ctx=vm.createContext({chrome,createSourcePlan,orderSources,sendWhenContentReady,createDownloadSuppression,shouldSuppressNativeTranscriptDownload,datedBatchFolder,sourceFolderPath,Map,Promise,Date,URL,crypto,TextEncoder,Uint8Array,btoa,unescape,encodeURIComponent,console,setTimeout}); vm.runInContext(script,ctx);
   const run=(expression)=>vm.runInContext(expression,ctx);
   return {ctx,run,chrome,session,local,sent,created,removed};
 }

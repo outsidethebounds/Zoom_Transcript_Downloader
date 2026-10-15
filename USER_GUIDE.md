@@ -45,7 +45,7 @@ My Notes exports transcript files available from note entries. It does not downl
 
 Files go under the browser's Downloads directory, optionally inside the configured subfolder. Each run uses a date-stamped ZoomTranscripts-MMDDYYYY root with separate Recordings and My Notes directories. Existing files are preserved; conflicts are uniquified.
 
-The legacy page-panel Settings control the filename pattern and Downloads subfolder. Default pattern: {date} - {time} - {title}. Tokens: {date}, {time}, {title}, {meetingId}. Meeting ID is optional unless enabled; collisions receive unique names. Missing date/time uses unknown-date / unknown-time rather than omitting a note. Review the preview before saving. Arbitrary absolute destinations are not supported; saves stay under browser Downloads.
+The collapsible Download settings section on Connect and the legacy page-panel Settings control the filename pattern and Downloads subfolder. Save changes explicitly; they affect future runs only. The Connect preview shows separate Recording and My Notes examples and destinations. Meeting IDs are available only for Recording filenames; My Notes previews never invent one. Default pattern: {date} - {time} - {title}. Tokens: {date}, {time}, {title}, {meetingId}. Meeting ID is optional unless enabled; collisions receive unique names. Missing date/time uses unknown-date / unknown-time rather than omitting a note. Review the preview before saving. Arbitrary absolute destinations are not supported; saves stay under browser Downloads.
 
 ## Stop, retry, and failures
 

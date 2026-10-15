@@ -14,7 +14,7 @@ The scope is the signed-in user's accessible items, not a company-wide crawl. Th
 
 A verified exact shared occurrence ID may produce a reciprocal **Also in My Notes / Also in Recordings** badge. Titles or numeric meeting IDs alone do not match. Missing associations stay uncertain; the exact cross-source unique-meeting total can remain unknown. Availability can also remain unknown until export.
 
-Files are saved beneath Downloads in a date-stamped ZoomTranscripts-MMDDYYYY folder with separate Recordings and My Notes subfolders. Existing files are preserved and conflicts uniquified. Settings in the legacy page panel control filename pattern and an optional Downloads subfolder.
+Files are saved beneath Downloads in a date-stamped ZoomTranscripts-MMDDYYYY folder with separate Recordings and My Notes subfolders. Existing files are preserved and conflicts uniquified. The collapsible Download settings section on Connect (also available in the legacy page panel) controls the filename pattern, optional Downloads subfolder, and Recording meeting-ID suffix. Changes are explicitly saved and apply to future runs.
 
 ## Install
 
