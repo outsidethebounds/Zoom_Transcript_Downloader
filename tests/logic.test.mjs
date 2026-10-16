@@ -27,6 +27,18 @@ function run() {
     '2026-04-04 - 0930 - Weekly Sync - 12345678901'
   );
 
+  for (const pattern of [
+    '{date} - {meetingId} - {title}',
+    '{meetingId} - {date} - {title}',
+    '{date} - {title} - {meetingId}',
+    '{meetingId}',
+  ]) {
+    const name = buildTargetBase({title:'Quarterly - Review',meetingId:'',dateText:'Apr 4, 2026 9:30 AM'}, {filenamePattern:pattern,includeMeetingId:true});
+    assert.doesNotMatch(name, /(?:^| )- $|--/);
+    assert.doesNotMatch(name, /meetingId/);
+  }
+  assert.equal(buildTargetBase({title:'Quarterly - Review',meetingId:'12345678901',dateText:'Apr 4, 2026 9:30 AM'}, {filenamePattern:'{date} - {meetingId} - {title}',includeMeetingId:false}), '2026-04-04 - 12345678901 - Quarterly - Review', 'explicit legacy ID tokens preserve their intent');
+
   const collision = applyCollisionSafeFilenames([
     { targetBase: '2026-04-04 - 0930 - Weekly Sync', meetingId: '111' },
     { targetBase: '2026-04-04 - 0930 - Weekly Sync', meetingId: '222' },

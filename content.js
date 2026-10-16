@@ -162,10 +162,10 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-async function startCoordinatedSourceRun(mode, explicitSelected = null, totals = null, diagnosticStopAfterFirstFailure = false) {
+async function startCoordinatedSourceRun(mode, explicitSelected = null, totals = null, diagnosticStopAfterFirstFailure = false, explicitSettings = null) {
   const selected = Array.isArray(explicitSelected) ? sourceApi.orderedSources(Object.fromEntries(explicitSelected.map(s => [s === 'recordings' ? 'recordings' : 'myNotes', true]))) : mode === 'page' ? ['recordings'] : sourceApi.orderedSources({ recordings: document.querySelector('#ztd-source-recordings')?.checked, myNotes: document.querySelector('#ztd-source-notes')?.checked });
   if (selected.includes('recordings') && !recordingCapability?.available) { showToast(recordingCapability?.reason || 'Recording export is unavailable.', 'warn', 8000); return { ok: false, error: recordingCapability?.reason || 'Recording export is unavailable.' }; }
-  const settings = await getSettings();
+  const settings = explicitSettings && typeof explicitSettings === 'object' ? explicitSettings : await getSettings();
   if (!selected.length) { showToast('Select at least one source.', 'warn'); return; }
   sourceRunRequested = true;
   saveAllController = { running: true, stopRequested: false };
@@ -720,16 +720,18 @@ function ensureSettingsModal() {
     });
     modal.querySelectorAll('.ztd-preset-chip').forEach(button => {
       button.addEventListener('click', () => {
-        modal.querySelector('#ztd-settings-pattern').value = button.dataset.pattern || '';
+        const pattern = button.dataset.pattern || '';
+        modal.querySelector('#ztd-settings-pattern').value = pattern;
+        if (pattern.includes('{meetingId}')) modal.querySelector('#ztd-settings-include-meeting-id').checked = true;
         renderSettingsPreview(modal);
       });
     });
-    modal.querySelector('#ztd-settings-pattern').addEventListener('input', () => renderSettingsPreview(modal));
+    modal.querySelector('#ztd-settings-pattern').addEventListener('input', () => { if (currentPattern(modal).includes('{meetingId}')) modal.querySelector('#ztd-settings-include-meeting-id').checked = true; renderSettingsPreview(modal); });
     modal.querySelector('#ztd-settings-subfolder').addEventListener('input', () => renderSettingsPreview(modal));
-    modal.querySelector('#ztd-settings-include-meeting-id').addEventListener('change', () => renderSettingsPreview(modal));
+    modal.querySelector('#ztd-settings-include-meeting-id').addEventListener('change', () => { if (!modal.querySelector('#ztd-settings-include-meeting-id').checked) modal.querySelector('#ztd-settings-pattern').value = globalThis.ZTDCore.withoutOptionalToken(currentPattern(modal), 'meetingId'); renderSettingsPreview(modal); });
     modal.querySelector('#ztd-settings-save').addEventListener('click', async () => {
       const settings = {
-        filenamePattern: currentPattern(modal),
+        filenamePattern: modal.querySelector('#ztd-settings-include-meeting-id').checked ? currentPattern(modal) : globalThis.ZTDCore.withoutOptionalToken(currentPattern(modal), 'meetingId'),
         downloadSubfolder: currentDownloadSubfolder(modal),
         includeMeetingId: modal.querySelector('#ztd-settings-include-meeting-id').checked,
       };
@@ -1394,7 +1396,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'zoomTranscriptExtension:stopGuidedScan') { guidedRecordingScanStopped = true; const pending = pendingRecordingMetadataScan; if (pending) { clearTimeout(pending.timer); pendingRecordingMetadataScan = null; pending.reject(new Error('Scan stopped before metadata pagination was exhausted.')); } sendResponse({ ok: true }); return false; }
   if (message?.type === 'zoomTranscriptExtension:startGuidedDownload') {
     if ((message.payload?.selected || []).includes('recordings') && !recordingCapability?.available) { sendResponse({ ok: false, error: recordingCapability?.reason || 'Recording export is unavailable.' }); return false; }
-    startCoordinatedSourceRun('all', message.payload?.selected || [], message.payload?.totals || null, message.payload?.diagnosticStopAfterFirstFailure === true);
+    startCoordinatedSourceRun('all', message.payload?.selected || [], message.payload?.totals || null, message.payload?.diagnosticStopAfterFirstFailure === true, message.payload?.settings || null);
     sendResponse({ ok: true });
     return false;
   }
@@ -1442,7 +1444,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === 'zoomTranscriptExtension:sourceRunFinished' || message?.type === 'zoomTranscriptExtension:sourceRunPaused') {
     if (message.payload?.guided === true) { if (message.payload?.needsUserAction) showGuidedStatus('Action needed: ' + message.payload.needsUserAction.reason, true); else hideGuidedStatus(); }
-    chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedFinished', payload: { message: message.payload?.needsUserAction ? 'Action needed: ' + message.payload.needsUserAction.reason : 'Downloads finished. Review saved, unavailable, failed, and pending totals for each source.', results: message.payload?.results, needsUserAction: message.payload?.needsUserAction || null } }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:guidedFinished', payload: { message: message.payload?.needsUserAction ? 'Action needed: ' + message.payload.needsUserAction.reason : 'Downloads finished. Review saved, unavailable, failed, and pending totals for each source.', results: message.payload?.results, folderName: message.payload?.folderName || null, needsUserAction: message.payload?.needsUserAction || null } }).catch(() => {});
     sourceRunRequested = false;
     saveAllController.running = false;
     setSaveAllRunning(false);

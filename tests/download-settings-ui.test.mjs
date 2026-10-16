@@ -12,14 +12,14 @@ function makePreviewHarness(pattern, folder, includeMeetingId) {
   const coreContext={}; vm.runInNewContext(read('lib/core.js'),coreContext);
   const sourcesContext={}; vm.runInNewContext(read('lib/sources.js'),sourcesContext);
   const start=workspace.indexOf('function renderDownloadSettings()'); const end=workspace.indexOf('async function saveDownloadSettings()',start);
-  const context={$:id=>elements[id],globalThis:{ZTDCore:coreContext.ZTDCore,ZTDSources:sourcesContext.ZTDSources},datedBatchFolder,sourceFolderPath};
+  const context={$:id=>elements[id],updateDownloadSettingsLock(){},globalThis:{ZTDCore:coreContext.ZTDCore,ZTDSources:sourcesContext.ZTDSources},datedBatchFolder,sourceFolderPath};
   return {elements,render:vm.runInNewContext(workspace.slice(start,end)+'\nrenderDownloadSettings',context)};
 }
 
 test('Connect previews use production filename rules for both sources and real Downloads folders',()=>{
  const {elements,render}=makePreviewHarness('{date} - {time} - {title} - {meetingId}','Work/Zoom',true); render();
  assert.equal(elements['recording-preview'].textContent,'2026-04-04 - 0930 - Weekly Sync - 12345678901.txt');
- assert.equal(elements['notes-preview'].textContent,'2026-04-04 - 0930 - Weekly Sync -.txt','My Notes meetingId stays empty under the existing filename rule');
+ assert.equal(elements['notes-preview'].textContent,'2026-04-04 - 0930 - Weekly Sync.txt','My Notes removes an unavailable meeting ID and its adjacent separator');
  assert.match(elements['recording-destination'].textContent,/^Downloads\/Work\/Zoom\/ZoomTranscripts-\d{8}\/Recordings$/);
  assert.match(elements['notes-destination'].textContent,/^Downloads\/Work\/Zoom\/ZoomTranscripts-\d{8}\/My Notes$/);
 });
@@ -27,21 +27,21 @@ test('Connect previews use production filename rules for both sources and real D
 test('settings persistence is explicit, survives re-open, and never starts a scan/export',async()=>{
  const persisted={}; const controls={'settings-pattern':{value:'{date} - {title}'},'settings-folder':{value:'Team/Zoom'},'settings-meeting-id':{checked:true},'settings-status':{textContent:''}};let calls=0;
  const start=workspace.indexOf('async function saveDownloadSettings()');const end=workspace.indexOf('function status(',start);
- const context={$:id=>controls[id],scanBusy:false,activeRun:false,NS:'zoomTranscriptExtension',sanitizeDownloadSubfolder,chrome:{runtime:{sendMessage:async msg=>{calls++;assert.equal(msg.type,'zoomTranscriptExtension:setSettings');Object.assign(persisted,msg.settings);return {ok:true}}}},settings:{},renderDownloadSettings(){}};
+ const context={$:id=>controls[id],scanBusy:false,activeRun:false,NS:'zoomTranscriptExtension',sanitizeDownloadSubfolder,chrome:{runtime:{sendMessage:async msg=>{calls++;assert.equal(msg.type,'zoomTranscriptExtension:setSettings');Object.assign(persisted,msg.settings);return {ok:true}}}},settings:{},applyDownloadSettings:()=>{},currentDownloadSettings:()=>({filenamePattern:controls['settings-pattern'].value,downloadSubfolder:controls['settings-folder'].value,includeMeetingId:controls['settings-meeting-id'].checked}),renderDownloadSettings(){}};
  const save=vm.runInNewContext(workspace.slice(start,end)+'\nsaveDownloadSettings',context);await save();
- assert.deepEqual(JSON.parse(JSON.stringify(persisted)),{filenamePattern:'{date} - {title}',downloadSubfolder:'Team/Zoom',includeMeetingId:true});assert.match(controls['settings-status'].textContent,/future runs only/);assert.equal(calls,1);
+ assert.deepEqual(JSON.parse(JSON.stringify(persisted)),{filenamePattern:'{date} - {title}',downloadSubfolder:'Team/Zoom',includeMeetingId:true});assert.match(controls['settings-status'].textContent,/next export/);assert.equal(calls,1);
  // Re-open hydration reads precisely these persisted keys/defaults and repopulates controls.
  assert.match(workspace,/async function hydrate\(\)\{settings=await chrome\.storage\.local\.get\(\{companySubdomain:/,'workspace hydrates saved preference keys');
- assert.match(workspace,/settings-pattern'\)\.value=settings\.filenamePattern/);assert.match(workspace,/settings-folder'\)\.value=settings\.downloadSubfolder/);assert.match(workspace,/settings-meeting-id'\)\.checked=settings\.includeMeetingId===true/);
+ assert.match(workspace,/function hydrate\(\).*?applyDownloadSettings\(settings\)/s);assert.ok(workspace.includes("$('settings-pattern').value=normalized.filenamePattern"));assert.ok(workspace.includes("$('settings-folder').value=normalized.downloadSubfolder"));assert.ok(workspace.includes("$('settings-meeting-id').checked=normalized.includeMeetingId"));
  assert.doesNotMatch(workspace.slice(start,end),/startGuidedDownload|runScans|downloads\.download/);
 });
 
-test('Connect-only visibility and idle lock cover scans and exports',()=>{
- assert.ok(workspace.includes("$('download-settings').hidden=s!=='connect'"));
+test('settings stay available on Review and lock during scans and exports',()=>{
+ assert.match(workspace,/\$\('download-settings'\)\.hidden=!\(s==='connect'\|\|s==='review'\)/);assert.match(workspace,/\$\('download-settings'\)\.open=s==='review'/);
  assert.ok(workspace.includes('fields.disabled=scanBusy||activeRun'));
  assert.match(workspace,/finally\{stopPending=false;scanBusy=false;[^}]*updateDownloadSettingsLock()/);
  assert.match(workspace,/setStage\(recoveredWithoutInventory\?'connect':hasError\?'review':'save'\)/);
- const start=workspace.indexOf('function updateDownloadSettingsLock()');const end=workspace.indexOf('function renderDownloadSettings()',start);const disabled={};const fn=vm.runInNewContext(workspace.slice(start,end)+'\nupdateDownloadSettingsLock',{$:id=>disabled[id]|| (disabled[id]={}) ,scanBusy:true,activeRun:false});fn();assert.equal(disabled['download-settings-fields'].disabled,true);
+ const start=workspace.indexOf('function updateDownloadSettingsLock()');const end=workspace.indexOf('function renderDownloadSettings()',start);const disabled={};const fn=vm.runInNewContext(workspace.slice(start,end)+'\nupdateDownloadSettingsLock',{$:id=>disabled[id]|| (disabled[id]={}),scanBusy:true,activeRun:false,settingsAreDirty:()=>false,settingsReady:true,stage:'connect',$:id=>id==='settings-status'?{textContent:'Saved settings.',dataset:{}}:(disabled[id]||(disabled[id]={removeAttribute(){}}))});fn();assert.equal(disabled['download-settings-fields'].disabled,true);
 });
 
 test('shared path rules preserve sanitized relative folders and source-specific directories',()=>{

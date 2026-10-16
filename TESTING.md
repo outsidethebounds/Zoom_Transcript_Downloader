@@ -12,7 +12,7 @@ Run from the repository root:
 	node --check --input-type=module < workspace.js
 	node --test tests/*.test.mjs
 
-The repository contains 24 Node test files and 70 test cases. Tests are mocked Node/DOM/Chrome tests, not a cross-browser authenticated suite. Coverage includes guided inventory and exact matching, review and target guards, metadata-only scan boundaries, explicit terminal paging/authoritative totals, bounded readiness retry and Stop, metadata bridge allowlisting, source sequencing, export outcomes, download routing, live guided-job presentation, legacy-panel hidden styling and startup races, tab ownership, and pacing.
+Run the suite above for the current test count and results. Tests are mocked Node/DOM/Chrome tests, not a cross-browser authenticated suite. Coverage includes guided inventory and exact matching, review and target guards, metadata-only scan boundaries, explicit terminal paging/authoritative totals, bounded readiness retry and Stop, metadata bridge allowlisting, source sequencing, export outcomes, download routing, live guided-job presentation, legacy-panel hidden styling and startup races, tab ownership, pacing, saved-versus-draft download settings, filename ID controls, source scan retry, and run-specific destinations.
 
 ## Current pacing and guided status
 

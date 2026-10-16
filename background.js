@@ -337,7 +337,7 @@ async function finishSourceRun(run, extra = {}) {
         ...(firstError ? { firstError } : {}),
       }];
     }));
-    await chrome.storage.session.set({ 'ztd:last-guided-terminal': { runId: run.runId, results, interrupted: extra.interrupted === true, stopped: extra.stopped === true, needsUserAction: Boolean(extra.needsUserAction), completedAt: Date.now() } }).catch(() => {});
+    await chrome.storage.session.set({ 'ztd:last-guided-terminal': { runId: run.runId, folderName: run.rootFolder, results, interrupted: extra.interrupted === true, stopped: extra.stopped === true, needsUserAction: Boolean(extra.needsUserAction), completedAt: Date.now() } }).catch(() => {});
   }
   if (run.workerTabId) sourceRunByWorkerTab.delete(run.workerTabId);
   if (run.workerTabId && !extra.keepWorker) await closeOwnedWorkerIfStillOnSource(run, run.workerTabId);
@@ -644,7 +644,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === 'zoomTranscriptExtension:getSettings') {
-    inferDefaultOs().then(targetOs => chrome.storage.local.get({ ...BASE_DEFAULTS, targetOs }).then(sendResponse));
+    inferDefaultOs().then(targetOs => chrome.storage.local.get({ ...BASE_DEFAULTS, targetOs }).then(async settings => { if(!settings.includeMeetingId&&String(settings.filenamePattern||'').includes('{meetingId}')){settings.includeMeetingId=true;await chrome.storage.local.set({includeMeetingId:true})}sendResponse(settings)}));
     return true;
   }
   if (message?.type === 'zoomTranscriptExtension:setSettings') {

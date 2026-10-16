@@ -13,6 +13,10 @@ assert.equal(sources.buildSourceFolderPath('ZoomTranscripts-10112026', 'myNotes'
 const note = { id: 'opaque-1', title: 'Planning/Sync', dateISO: '2026-10-11', timeHHMM: '1044' };
 assert.equal(sources.buildMyNotesFilename(note), '2026-10-11 - 1044 - Planning Sync.txt');
 assert.equal(sources.buildMyNotesFilename(note, { includeNoteId: true }), '2026-10-11 - 1044 - Planning Sync - opaque-1.txt');
+assert.equal(sources.buildMyNotesFilename({...note,title:'Quarterly - Review'}, {filenamePattern:'{date} - {meetingId} - {title}'}), '2026-10-11 - Quarterly - Review.txt');
+assert.equal(sources.buildMyNotesFilename({...note,title:'Quarterly - Review'}, {filenamePattern:'{date} - {title} - {meetingId}'}), '2026-10-11 - Quarterly - Review.txt');
+assert.equal(sources.buildMyNotesFilename(note, {filenamePattern:'{meetingId}'}), 'Untitled Note.txt', 'token-only Notes patterns fall back to a usable filename');
+
 const collisions = sources.collisionSafeNoteFilenames([
   { id: 'n1', title: 'Same', dateISO: '2026-10-11', timeHHMM: '1044' },
   { id: 'n2', title: 'Same', dateISO: '2026-10-11', timeHHMM: '1044' },

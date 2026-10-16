@@ -46,12 +46,12 @@ const tick=()=>new Promise(r=>setImmediate(r));
 }
 {
  const f=fixture();await f.run('recoveryReady');
- f.ctx.payload={selected:['myNotes','recordings'],originUrl:'https://us01mynotes.zoom.us/allNotes',settings:{},scope:{page:2,rowKeys:['only-visible']},testLimit:1};
+ f.ctx.payload={selected:['myNotes','recordings'],originUrl:'https://us01mynotes.zoom.us/allNotes',settings:{filenamePattern:'reviewed-pattern',downloadSubfolder:'Reviewed/Folder',includeMeetingId:true},scope:{page:2,rowKeys:['only-visible']},testLimit:1};
  await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
  assert.equal(f.created.length,1);assert.equal(f.created[0].active,false);
  assert.equal(f.sent.find(m=>m.type.endsWith('workerStartRecordings')).payload.scope.page,2);
  assert.equal(f.sent.find(m=>m.type.endsWith('workerStartRecordings')).payload.testLimit,1);
- const saved=f.session['ztd:source-runs'][0];assert.equal(saved.currentSource,'recordings');assert.equal(saved.workerStarted,true);
+ const saved=f.session['ztd:source-runs'][0];assert.equal(saved.currentSource,'recordings');assert.equal(saved.workerStarted,true);assert.ok(saved.rootFolder.startsWith('Reviewed/Folder/ZoomTranscripts-'),'background derives the original run folder from the reviewed settings snapshot');assert.equal(f.sent.find(m=>m.type.endsWith('workerStartRecordings')).payload.settings.filenamePattern,'reviewed-pattern');
  await f.run('handleSourceWorkerResult(10,{runId:"wrong",source:"recordings",saved:99})');assert.equal(f.created.length,1);
  f.ctx.rid=saved.runId;await f.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",saved:1,failed:0})');
  assert.equal(f.created.length,2);assert.ok(f.sent.some(m=>m.type.endsWith('workerStartMyNotes')));
@@ -250,7 +250,7 @@ const tick=()=>new Promise(r=>setImmediate(r));
 }
 {
  const f=fixture();await f.run('recoveryReady');
- const run={runId:'safe-terminal',originTabId:1,originUrl:'https://zoom.us/recording/meeting/transcript',rootFolder:'safe',settings:{},totals:{},mode:'all',plan:createSourcePlan(['myNotes']),results:{myNotes:{saved:2,skipped:1,failed:0,pending:3,error:'private url must not persist',firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed https://files.example/private?token=private-marker'}}},currentSource:'myNotes',guided:true,finished:false,workerTabId:null};
+ const run={runId:'safe-terminal',originTabId:1,originUrl:'https://zoom.us/recording/meeting/transcript',rootFolder:'Team/ZoomTranscripts-10162026',settings:{},totals:{},mode:'all',plan:createSourcePlan(['myNotes']),results:{myNotes:{saved:2,skipped:1,failed:0,pending:3,error:'private url must not persist',firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed https://files.example/private?token=private-marker'}}},currentSource:'myNotes',guided:true,finished:false,workerTabId:null};
  f.ctx.terminalRun=run;await f.run('finishSourceRun(terminalRun)');
  assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:last-guided-terminal'].results.myNotes)),{saved:2,skipped:1,failed:0,pending:3,error:true,firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed [redacted-url]'}});
  assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private url'),false,'terminal journal omits raw worker error detail');
@@ -258,6 +258,7 @@ const tick=()=>new Promise(r=>setImmediate(r));
  let response;const handler=f.chrome.runtime.onMessage.listeners[0];
  await new Promise(resolve=>handler({type:'zoomTranscriptExtension:getGuidedRunState'},{tab:{id:900}},value=>{response=value;resolve()}));
  assert.equal(response.terminal.runId,'safe-terminal','missed terminal outcomes replay on workspace hydration');
+ assert.equal(response.terminal.folderName,'Team/ZoomTranscripts-10162026','recovery preserves the original run folder instead of recomputing it from current preferences or date');
  await new Promise(resolve=>handler({type:'zoomTranscriptExtension:ackGuidedTerminal',payload:{runId:'safe-terminal'}},{tab:{id:900}},resolve));
  assert.equal(f.session['ztd:last-guided-terminal'],undefined,'replayed terminal is acknowledged once');
 }

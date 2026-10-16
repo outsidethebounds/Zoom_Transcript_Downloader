@@ -1,6 +1,6 @@
 # Zoom Transcript Downloader User Guide
 
-Version: 2026.10.1 (guided workspace)
+Version: 2026.10.2 · guided workspace
 
 ## What it does
 
@@ -25,13 +25,13 @@ For manual installation, extract the supplied ZIP, open chrome://extensions (Chr
 ## Guided workflow: scan, review, download
 
 1. Install the extension. The guided workspace opens on first install; later open it from the extension toolbar button.
-2. Enter your organization's Zoom subdomain (the part before .zoom.us); do not enter a password. Select Recording transcripts, My Notes transcripts, or both for the later download. Selection is not authorization to export.
+2. Enter your organization's Zoom subdomain (the part before .zoom.us); do not enter a password. Select Recording transcripts, My Notes transcripts, or both for the later download. Selection is not authorization to export. The guided scan checks both source lists; selection determines which complete sources can be downloaded.
 3. Choose **Open Zoom and scan sources**. The extension opens/reuses both Zoom source lists in background tabs and scans metadata only. Sign in on Zoom/SSO if prompted. The workspace waits up to two minutes for recognized sign-in/page readiness; **Stop** cancels discovery. It may bring a Zoom tab forward when attention is needed.
-4. Review source status and availability. Recording pagination completes only on Zoom’s explicit terminal page and a matching total. My Notes completeness comes from the authenticated list API’s empty `nextPageToken`, with a matching count of collected note metadata.
-5. Select only fully scanned sources, then explicitly choose **Download selected transcripts**. If a scan is incomplete, leave that source unselected; partial rows are never passed as a complete inventory. A user-assisted Edge acceptance run completed exports for both selected sources, and per-source results matched the downloaded files in the dated Recordings and My Notes folders. Sources are processed sequentially while the workspace shows progress/results. While a job is active, Zoom source pages show a centered progress bubble with live counts and a Stop download button; completed files are preserved.
-6. Review per-source saved, unavailable, failed, and remaining counts. **Action needed** is not success: sign in on the indicated Zoom tab, then restart the affected source. Completed files remain in place.
+4. Review source status and availability. Recording pagination completes only on Zoom’s explicit terminal page and a matching total. My Notes completeness comes from the authenticated list API’s empty `nextPageToken`, with a matching count of collected note metadata. If a scan is incomplete, retry that source from Review; its partial rows are not eligible for export, and a completed source scan is retained.
+5. Select one or both fully scanned sources, then explicitly choose **Download selected transcripts**. With no source selected, the workspace prompts you to select at least one. Partial rows are never passed as a complete inventory. Sources are processed sequentially while the workspace shows progress/results. While a job is active, Zoom source pages show a centered progress bubble with live counts and a Stop download button; completed files are preserved.
+6. Review per-source saved, unavailable, failed, and remaining counts, plus the destination used for that run. **Action needed** is not success: sign in on the indicated Zoom tab, then retry the affected source. Completed files remain in place. A source-level export retry can save successful items again and create additional uniquely named copies; review the warning before retrying.
 
-After connection/results the workspace hides company/source setup. Its content is responsive and capped at 972px; this does not resize the browser or operating-system window. Changing the company target or a reviewed Zoom source URL invalidates the inventory; scan again. The source-list tabs may remain open for review and retry; the extension does not close user-created or reused tabs. Only its own terminal worker tab may be closed, and only while still on the run source page. Keep the browser open during a run.
+The workspace keeps download settings editable on Connect and Review. Changes must be saved or discarded before scanning or exporting can continue. Review shows the saved effective filename examples and destinations. Changing the company target or a reviewed Zoom source URL invalidates the inventory; scan again. The Results view shows the destination captured for the run, including after reopening the workspace. For older runs without a recorded destination, the path is shown as unavailable. The source-list tabs may remain open for review and retry; the extension does not close user-created or reused tabs. Only its own terminal worker tab may be closed, and only while still on the run source page. Keep the browser open during a run.
 
 ## Understand the inventory
 
@@ -45,13 +45,13 @@ My Notes exports transcript files available from note entries. It does not downl
 
 Files go under the browser's Downloads directory, optionally inside the configured subfolder. Each run uses a date-stamped ZoomTranscripts-MMDDYYYY root with separate Recordings and My Notes directories. Existing files are preserved; conflicts are uniquified.
 
-The collapsible Download settings section on Connect and the legacy page-panel Settings control the filename pattern and Downloads subfolder. Save changes explicitly; they affect future runs only. The Connect preview shows separate Recording and My Notes examples and destinations. Meeting IDs are available only for Recording filenames; My Notes previews never invent one. Default pattern: {date} - {time} - {title}. Tokens: {date}, {time}, {title}, {meetingId}. Meeting ID is optional unless enabled; collisions receive unique names. Missing date/time uses unknown-date / unknown-time rather than omitting a note. Review the preview before saving. Arbitrary absolute destinations are not supported; saves stay under browser Downloads.
+The collapsible Download settings section on Connect and Review and the legacy page-panel Settings control the filename pattern and Downloads subfolder. Save or discard edits before scanning or exporting. Review shows separate effective Recording and My Notes filename examples and destinations; these are the saved settings used for export. Default pattern: `{date} - {time} - {title}`. Tokens: `{date}`, `{time}`, `{title}`, `{meetingId}`. Recording meeting IDs are optional: enabling the ID checkbox includes the ID in every Recording filename where one is available; adding `{meetingId}` to the pattern also enables the checkbox, and unchecking it removes the token. My Notes filenames never include a meeting ID; an empty ID token and its adjacent separator are omitted. Missing date/time uses `unknown-date` / `unknown-time` rather than omitting a note. Review the examples before saving. Arbitrary absolute destinations are not supported; saves stay under browser Downloads.
 
 ## Stop, retry, and failures
 
 Stop during a scan cancels discovery without beginning exports. During export it prevents later exports. Completed files remain; depending on the active source operation, the current operation may finish or be canceled safely. Check final counts; Stop does not roll back completed files.
 
-The extension does not certify partial scans, label ambiguous failures as saved, or promise automatic resume. Retry the source needing attention when practical. Existing files are preserved and conflicts uniquified. Unavailable entries may be skipped; authentication, rate limits, changed Zoom behavior, and ambiguous failures are reported rather than treated as success.
+The extension does not certify partial scans, label ambiguous failures as saved, or promise automatic resume. Retry an incomplete scan from Review using that source’s retry action; completed source scans are retained. For export failures, the retry is source-level rather than limited to failed rows. It may export already-saved rows again, creating additional uniquely named copies. Existing files are preserved and conflicts uniquified. Unavailable entries may be skipped; authentication, rate limits, changed Zoom behavior, and ambiguous failures are reported rather than treated as success.
 
 ## Legacy page panel (advanced/fallback)
 
@@ -62,7 +62,8 @@ The older in-page panel remains on supported Zoom transcript pages as a manual/a
 - **Workspace did not open:** use the extension toolbar button. For manual installs, reload the extension in the browser Extensions page.
 - **Sign-in/access required or readiness timed out:** sign in directly on the indicated Zoom/SSO tab and retry. Readiness waits are bounded to two minutes.
 - **My Notes scan incomplete:** a page is complete only after the authenticated Notes API returns an empty `nextPageToken` and the collected row count matches. If that proof is missing, collected rows are partial and cannot be exported as complete.
-- **A source export reports errors:** review that source’s saved, unavailable, failed, and remaining counts. Confirm Zoom access and the selected date range, then start a new scan before retrying. Completed files are preserved; avoid repeating a completed source export unless you intend to create another dated batch.
+- **A source scan is incomplete:** use that source’s retry action on Review. A completed source scan is retained; partial rows from the incomplete source cannot be exported.
+- **A source export reports errors:** review that source’s saved, unavailable, failed, and remaining counts and the retry warning. Confirm Zoom access and the selected date range, then retry only the source needing attention. A source-level retry can create additional copies of items already saved successfully.
 - **Company/source changed:** rescan; target changes invalidate reviewed inventory.
 - **No transcripts/some unavailable:** verify the source list and Zoom access. Availability may remain unknown until export.
 - **Files not where expected:** check Downloads, configured subfolder, dated root, and the separate source folders.
@@ -70,7 +71,7 @@ The older in-page panel remains on supported Zoom transcript pages as a manual/a
 
 ## Validation and limitations
 
-The repository has 24 Node test files and 70 mocked cases; these are not a full cross-browser suite. User-assisted Edge acceptance completed a full two-source export and reconciled terminal results with downloaded files. Workspace reload recovered terminal totals. A follow-up metadata scan Stop check confirmed that the completed source stayed complete, the incomplete source was marked stopped, and no export began; existing files remained unchanged. Chrome, Stop during active export, rate-limit/expiry behavior, and broader native-wheel rail behavior remain untested. Native scrolling through the Recording inventory was verified live.
+User-assisted Edge acceptance completed a full two-source export and reconciled terminal results with downloaded files. Workspace reload recovered terminal totals. A follow-up metadata scan Stop check confirmed that the completed source stayed complete, the incomplete source was marked stopped, and no export began; existing files remained unchanged. Chrome, Stop during active export, rate-limit/expiry behavior, and broader native-wheel rail behavior remain untested. Native scrolling through the Recording inventory was verified live.
 
 Older screenshots and printable PDFs may depict the former recordings-only/legacy panel. This current guide and README describe the guided workflow.
 
