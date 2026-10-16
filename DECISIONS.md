@@ -3,12 +3,12 @@
 ## Current workflow decisions (2026.10.1; authoritative for current product)
 
 - The extension-owned guided workspace is the primary user entry; the older injected panel and its Save all / Save page actions are legacy/advanced fallback.
-- Discovery scans accessible metadata from both Recording transcripts and My Notes; it does not export transcript bodies. Both scans must be complete and reviewed before explicit selected-source export.
+- Discovery scans accessible metadata from both Recording transcripts and My Notes; it does not export transcript bodies. Only fully scanned selected sources can be exported; incomplete sources must remain unselected.
 - Authentication stays on Zoom/SSO; no extension password prompt or storage. Scope is the signed-in user's accessible items, not company-wide.
 - Exact verified shared occurrence identifiers alone produce reciprocal cross-source badges. Missing association and unknown availability remain distinct; do not invent a unique count.
 - Stop prevents subsequent exports; completed files are preserved. Do not promise automatic resume or asset-level selection.
 - Files use a dated root with source-separated folders under Downloads. My Notes means transcript files only.
-- Version 2026.10.1 has 20 mocked Node test files / 54 cases. The live hidden-panel regression was verified after reload; metadata scan paused at My Notes sign-in/readiness with no downloads. A mocked pending count of 13 does not resolve a live 13-asset discrepancy. Live Stop-during-export, fresh SSO-to-export, and native-wheel acceptance remain unverified.
+- The repository has 24 mocked Node test files / 70 cases. User-assisted Edge acceptance completed a full export for both selected sources and reconciled terminal results with saved files; workspace reload recovered terminal totals. A follow-up metadata Stop check showed completed and incomplete sources accurately, without starting an export. Chrome, Stop during active export, rate-limit/expiry behavior, and broader native-wheel behavior remain untested.
 
 The numbered decisions below are preserved historical records. Where they describe the injected recordings panel, Save all, Save page, or 2026.09 behavior, they apply only to that older surface and are superseded for the primary guided workflow by the decisions above.
 

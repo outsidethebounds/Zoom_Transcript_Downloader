@@ -9,20 +9,41 @@ const script = fs.readFileSync(new URL('../background.js', import.meta.url), 'ut
 const event = () => ({ listeners: [], addListener(f) { this.listeners.push(f); } });
 const store = data => ({ async get(keys) { if (keys == null) return {...data}; if (typeof keys === 'string') return {[keys]: data[keys]}; return Object.fromEntries(Object.entries(keys).map(([k,v])=>[k,data[k]??v])); }, async set(v) { Object.assign(data,v); }, async remove(k) { delete data[k]; } });
 function fixture(session = {}) {
-  const local = {}, sent = [], created = [], removed = []; let tabId = 10;
+  const local = {}, sent = [], created = [], removed = [], scriptCalls = []; let tabId = 10;
   const chrome = {
     runtime: {id:'extension', onMessage:event(),onInstalled:event(),onStartup:event(),getPlatformInfo:async()=>({os:'mac'})},
     storage:{local:store(local),session:store(session)},
     action:{onClicked:event(),setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{}},
-    scripting:{insertCSS:async()=>{},executeScript:async()=>{}},
-    tabs:{onUpdated:event(),onRemoved:event(),onActivated:event(),query:async()=>[],create:async opts=>{const t={id:tabId++,status:'complete',url:opts.url};created.push({...t,...opts});return t;},get:async id=>created.find(t=>t.id===id),remove:async id=>removed.push(id),update:async()=>{},sendMessage:async(id,message)=>{sent.push({id,...message});return {ok:true};}},
+    scripting:{insertCSS:async()=>{},executeScript:async opts=>{scriptCalls.push(opts);}},
+    tabs:{onUpdated:event(),onRemoved:event(),onActivated:event(),query:async()=>[],create:async opts=>{const t={id:tabId++,status:'complete',url:opts.url};created.push({...t,...opts});return t;},get:async id=>created.find(t=>t.id===id),remove:async id=>removed.push(id),update:async()=>{},sendMessage:async(id,message)=>{sent.push({id,...message});return message.type==='zoomTranscriptExtension:ping'?{ok:true,recordingCapabilityVersion:1,recordingCapabilityAvailable:true}:{ok:true};}},
     downloads:{onCreated:event(),onChanged:event(),onDeterminingFilename:event(),cancel:async()=>{},removeFile:async()=>{},erase:async()=>{},download:async()=>1,search:async()=>[{state:'complete',fileSize:10}]},
   };
-  const ctx=vm.createContext({chrome,createSourcePlan,orderSources,sendWhenContentReady,createDownloadSuppression,shouldSuppressNativeTranscriptDownload,datedBatchFolder,sourceFolderPath,Map,Promise,Date,URL,crypto,TextEncoder,Uint8Array,btoa,unescape,encodeURIComponent,console,setTimeout}); vm.runInContext(script,ctx);
+  const ctx=vm.createContext({chrome,createSourcePlan,orderSources,sendWhenContentReady,createDownloadSuppression,shouldSuppressNativeTranscriptDownload,datedBatchFolder,sourceFolderPath,ZTDRecordingCapability:{available:true,reason:'test capability enabled'},Map,Promise,Date,URL,crypto,TextEncoder,Uint8Array,btoa,unescape,encodeURIComponent,console,setTimeout}); vm.runInContext(script,ctx);
   const run=(expression)=>vm.runInContext(expression,ctx);
-  return {ctx,run,chrome,session,local,sent,created,removed};
+  return {ctx,run,chrome,session,local,sent,created,removed,scriptCalls};
 }
 const tick=()=>new Promise(r=>setImmediate(r));
+{
+ const f=fixture();await f.run('recoveryReady');
+ let pings=0;
+ f.chrome.tabs.sendMessage=async(id,message)=>{
+   f.sent.push({id,...message});
+   if(message.type==='zoomTranscriptExtension:ping') return ++pings===1?{ok:true,recordingCapabilityVersion:null,recordingCapabilityAvailable:false}:{ok:true,recordingCapabilityVersion:1,recordingCapabilityAvailable:true};
+   return {ok:true};
+ };
+ const ready=await f.run('ensureExtensionUi(99,"https://app.zoom.us/recording/meeting/transcript")');
+ assert.equal(ready,true,'fresh and already-open documents become ready once the capability dependency is injected');
+ const bundle=f.scriptCalls.find(call=>call.files?.includes('content.js'))?.files||[];
+ assert.ok(bundle.indexOf('lib/recording-capability.js')>=0&&bundle.indexOf('lib/recording-capability.js')<bundle.indexOf('content.js'),'reinjection installs capability before idempotent content.js');
+}
+{
+ const f=fixture();await f.run('recoveryReady');let downloads=0;
+ f.chrome.downloads.download=async()=>{downloads++;return 1;};
+ f.chrome.tabs.sendMessage=async(id,message)=>{f.sent.push({id,...message});return message.type==='zoomTranscriptExtension:ping'?{ok:true,recordingCapabilityVersion:null,recordingCapabilityAvailable:false}:{ok:true};};
+ const ready=await f.run('ensureExtensionUi(99,"https://app.zoom.us/recording/meeting/transcript")');
+ assert.equal(ready,false,'an old static content closure is not misreported as ready after reinjection');
+ assert.equal(downloads,0,'readiness recovery does not start an export');
+}
 {
  const f=fixture();await f.run('recoveryReady');
  f.ctx.payload={selected:['myNotes','recordings'],originUrl:'https://us01mynotes.zoom.us/allNotes',settings:{},scope:{page:2,rowKeys:['only-visible']},testLimit:1};
@@ -229,10 +250,11 @@ const tick=()=>new Promise(r=>setImmediate(r));
 }
 {
  const f=fixture();await f.run('recoveryReady');
- const run={runId:'safe-terminal',originTabId:1,originUrl:'https://zoom.us/recording/meeting/transcript',rootFolder:'safe',settings:{},totals:{},mode:'all',plan:createSourcePlan(['myNotes']),results:{myNotes:{saved:2,skipped:1,failed:0,pending:3,error:'private url must not persist'}},currentSource:'myNotes',guided:true,finished:false,workerTabId:null};
+ const run={runId:'safe-terminal',originTabId:1,originUrl:'https://zoom.us/recording/meeting/transcript',rootFolder:'safe',settings:{},totals:{},mode:'all',plan:createSourcePlan(['myNotes']),results:{myNotes:{saved:2,skipped:1,failed:0,pending:3,error:'private url must not persist',firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed https://files.example/private?token=private-marker'}}},currentSource:'myNotes',guided:true,finished:false,workerTabId:null};
  f.ctx.terminalRun=run;await f.run('finishSourceRun(terminalRun)');
- assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:last-guided-terminal'].results.myNotes)),{saved:2,skipped:1,failed:0,pending:3,error:true});
- assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private url'),false,'terminal journal contains counts and error flags only');
+ assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:last-guided-terminal'].results.myNotes)),{saved:2,skipped:1,failed:0,pending:3,error:true,firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed [redacted-url]'}});
+ assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private url'),false,'terminal journal omits raw worker error detail');
+ assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private-marker'),false,'terminal diagnostics redact URL query data');
  let response;const handler=f.chrome.runtime.onMessage.listeners[0];
  await new Promise(resolve=>handler({type:'zoomTranscriptExtension:getGuidedRunState'},{tab:{id:900}},value=>{response=value;resolve()}));
  assert.equal(response.terminal.runId,'safe-terminal','missed terminal outcomes replay on workspace hydration');

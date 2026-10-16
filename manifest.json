@@ -42,6 +42,7 @@
         "lib/runtime.js",
         "lib/sources.js",
         "lib/pacing.js",
+        "lib/recording-capability.js",
         "content.js"
       ],
       "css": [
@@ -66,6 +67,7 @@
       ],
       "js": [
         "lib/sources.js",
+        "lib/recording-capability.js",
         "my-notes.js"
       ],
       "css": [

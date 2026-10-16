@@ -74,16 +74,17 @@ async function run({ stopAfter = 0, missing = false, scope = null, stopAccessInd
       }
       if (message.type.endsWith(':expectMyNotesExport')) armed = message.payload.exportId; return { ok: true }; },
   } };
+  let pagination = { valid: true, method: 'GET', path: '/api/file/meeting_notes/my_notes', status: 200, mime: 'application/json', requestKeys: ['meetingInfoRequired','pageSize'], notesCount: 20, nextPageTokenPresent: true, sequence: 1, pages: 1, totalRows: 20 };
   const context = vm.createContext({ chrome, document, location, ZTDSources: sources,
-    window: { addEventListener(type, fn) { if (type === 'message') windowListeners.add(fn); }, removeEventListener(type, fn) { windowListeners.delete(fn); }, postMessage(data) { if (data.source === 'ztd-notes-load-more') count = 32; if (data.source === 'ztd-notes-direct-request' && data.action !== 'cancel') {
+    window: { addEventListener(type, fn) { if (type === 'message') windowListeners.add(fn); }, removeEventListener(type, fn) { windowListeners.delete(fn); }, postMessage(data) { if (data.source === 'ztd-notes-pagination-probe') queueMicrotask(() => { for (const fn of windowListeners) fn({ source: this, origin: location.origin, data: { source: 'ztd-notes-pagination-state', requestId: data.requestId, payload: pagination } }); }); if (data.source === 'ztd-notes-load-more') { count = 32; pagination = { valid: true, method: 'GET', path: '/api/file/meeting_notes/my_notes', status: 200, mime: 'application/json', requestKeys: ['meetingInfoRequired','pageSize','pageToken'], notesCount: 12, nextPageTokenPresent: false, sequence: pagination.sequence + 1, pages: 2, totalRows: 32 }; queueMicrotask(() => { for (const fn of windowListeners) fn({ source: this, origin: location.origin, data: { source: 'ztd-notes-pagination-result', payload: pagination } }); }); } if (data.source === 'ztd-notes-direct-request' && data.action !== 'cancel') {
         directRequests++;
         if (stopDirect) for (const listener of [...listeners]) listener({ type: 'zoomTranscriptExtension:stopSourceWorker' }, {}, () => {});
-        queueMicrotask(() => { for (const fn of windowListeners) fn({source: context.window, data: {source: 'ztd-notes-direct-response', requestId: data.requestId, kind: direct ? directKind : 'unavailable', status: directKind === 'inaccessible' ? 403 : 401, url: 'https://file-paa.zoom.us/ephemeral', expiresAt: 1e12}}); });
+        queueMicrotask(() => { for (const fn of windowListeners) fn({source:context.window,data:{source:'ztd-notes-direct-response',requestId:data.requestId,kind:direct?directKind:'unavailable',status:directKind==='inaccessible'?403:401,url:'https://file-paa.zoom.us/ephemeral',expiresAt:1e12}}); });
       } } },
     history: { back() { queueMicrotask(() => { detail = null; location.pathname = '/allNotes'; count = 20; newRoot(); }); } },
     getComputedStyle: () => ({ overflowY: 'auto' }),
     Date: { now: () => clock },
-    setTimeout(f, ms) { if (ms < 35000) queueMicrotask(() => { clock += ms; f(); }); return 1; }, clearTimeout() {},
+    setTimeout(f, ms) { if (ms < 35000) setImmediate(() => { clock += ms; f(); }); return 1; }, clearTimeout() {},
     MutationObserver: class { constructor(callback) { this.callback = callback; } observe() { observers.add(this); } disconnect() { observers.delete(this); } },
     Event: class {}, MouseEvent: class {}, PointerEvent: class {}, console,
   });

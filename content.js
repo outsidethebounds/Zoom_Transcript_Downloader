@@ -2,6 +2,9 @@
 if (globalThis.__ztdRecordingsLoaded) return;
 globalThis.__ztdRecordingsLoaded = true;
 const EXTENSION_NS = 'zoomTranscriptExtension';
+// Resolve capability dynamically: older open tabs may receive this dependency
+// through safe reinjection after an extension reload.
+const recordingCapability = new Proxy({}, { get: (_target, key) => globalThis.ZTDRecordingCapability?.[key] });
 const PANEL_ID = 'ztd-panel';
 const LAUNCHER_ID = 'ztd-launcher';
 const SETTINGS_MODAL_ID = 'ztd-settings-modal';
@@ -76,7 +79,12 @@ let stickyPanelMessage = null;
 let currentDownloadFolderName = null;
 let pendingTranscriptWaiters = [];
 let transcriptResponseQueue = [];
+let nextCaptureGeneration = 0;
+let activeTranscriptCapture = null;
+const RECORDING_CAPTURE_CONTRACT_VERIFIED = true;
 let pendingRecordingMetadataScan = null;
+let recordingOccurrenceBySourceId = new Map();
+let recordingMetadataRefreshPromise = null;
 let sourceWorkerRun = null;
 let sourceRunRequested = false;
 let guidedWorkspace = false;
@@ -100,6 +108,7 @@ function admitRecordingWorkerRun(payload) {
 async function completeRecordingWorker(run, result) {
   if (!run || run.completionSent) return;
   run.completionSent = true;
+  deactivateTranscriptCapture(run.captureGeneration, run.runId);
   if (run.controlActive) {
     try { window.postMessage({ source: 'ztd-recording-worker-control', active: false }, location.origin); } catch {}
     run.controlActive = false;
@@ -153,16 +162,17 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-async function startCoordinatedSourceRun(mode, explicitSelected = null, totals = null) {
-  const settings = await getSettings();
+async function startCoordinatedSourceRun(mode, explicitSelected = null, totals = null, diagnosticStopAfterFirstFailure = false) {
   const selected = Array.isArray(explicitSelected) ? sourceApi.orderedSources(Object.fromEntries(explicitSelected.map(s => [s === 'recordings' ? 'recordings' : 'myNotes', true]))) : mode === 'page' ? ['recordings'] : sourceApi.orderedSources({ recordings: document.querySelector('#ztd-source-recordings')?.checked, myNotes: document.querySelector('#ztd-source-notes')?.checked });
+  if (selected.includes('recordings') && !recordingCapability?.available) { showToast(recordingCapability?.reason || 'Recording export is unavailable.', 'warn', 8000); return { ok: false, error: recordingCapability?.reason || 'Recording export is unavailable.' }; }
+  const settings = await getSettings();
   if (!selected.length) { showToast('Select at least one source.', 'warn'); return; }
   sourceRunRequested = true;
   saveAllController = { running: true, stopRequested: false };
   setSaveAllRunning(true);
   const activity = document.querySelector('#ztd-activity-note');
   if (activity) activity.textContent = 'Starting selected sources in an inactive worker tab.';
-  const response = await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:startSourceRun`, payload: { selected, settings, totals: totals && typeof totals === 'object' ? totals : undefined, currentSource: 'recordings', mode, guidedWorkspace: guidedWorkspace === true, originUrl: location.href, scope: mode === 'page' ? { page: getPaginationState().currentPage, rowKeys: scanRows().map(row => row.key) } : null } });
+  const response = await chrome.runtime.sendMessage({ type: `${EXTENSION_NS}:startSourceRun`, payload: { selected, settings, totals: totals && typeof totals === 'object' ? totals : undefined, currentSource: 'recordings', mode, guidedWorkspace: guidedWorkspace === true, originUrl: location.href, scope: mode === 'page' ? { page: getPaginationState().currentPage, rowKeys: scanRows().map(row => row.key) } : null, diagnosticStopAfterFirstFailure: diagnosticStopAfterFirstFailure === true } });
   if (!response?.ok) { sourceRunRequested = false; saveAllController.running = false; setSaveAllRunning(false); showToast(response?.error || 'Could not start the source batch.', 'error'); }
 }
 
@@ -182,13 +192,23 @@ function showToast(message, kind = 'info', timeoutMs = 3500) {
   }, timeoutMs);
 }
 
+function redactDiagnosticValue(value) {
+  const redact = text => String(text).replace(/https?:\/\/[^\s"\'<>]+/gi, raw => { try { const url = new URL(raw); return url.origin + url.pathname; } catch { return '[redacted-url]'; } });
+  if (typeof value === 'string') return redact(value);
+  if (value == null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(redactDiagnosticValue);
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactDiagnosticValue(item)]));
+}
+function safeDiagnosticUrl(value) { try { const url = new URL(value); return url.origin + url.pathname; } catch { return null; } }
 function log(message, extra) {
-  const line = `[${new Date().toLocaleTimeString()}] ${message}${extra ? ` ${typeof extra === 'string' ? extra : JSON.stringify(extra)}` : ''}`;
+  const safeMessage = redactDiagnosticValue(message);
+  const safeExtra = redactDiagnosticValue(extra);
+  const line = '[' + new Date().toLocaleTimeString() + '] ' + safeMessage + (safeExtra ? ' ' + (typeof safeExtra === 'string' ? safeExtra : JSON.stringify(safeExtra)) : '');
   logLines.unshift(line);
   logLines = logLines.slice(0, 150);
   const el = document.getElementById('ztd-log');
   if (el) el.textContent = logLines.join('\n');
-  console.log('[ZTD]', message, extra || '');
+  console.log('[ZTD]', safeMessage, safeExtra || '');
 }
 
 function setOutput(value) {
@@ -259,6 +279,20 @@ function requestRecordingMetadataScan(timeoutMs = 60000) {
   });
 }
 
+async function getRecordingOccurrenceId(sourceId) {
+  const cached = recordingOccurrenceBySourceId.get(sourceId);
+  if (cached) return cached;
+  if (!recordingMetadataRefreshPromise) {
+    recordingMetadataRefreshPromise = requestRecordingMetadataScan().then(result => {
+      if (!Array.isArray(result?.rows) || !result.rows.length) throw new Error('Zoom returned no recording ID metadata for capture correlation.');
+      recordingOccurrenceBySourceId = new Map(result.rows.map(row => [String(row.sourceId || ''), String(row.occurrenceId || '')]).filter(([key, value]) => key && value));
+      return recordingOccurrenceBySourceId;
+    }).finally(() => { recordingMetadataRefreshPromise = null; });
+  }
+  const map = await recordingMetadataRefreshPromise;
+  return map.get(sourceId) || '';
+}
+
 function acceptRecordingMetadataResult(payload) {
   const pending = pendingRecordingMetadataScan;
   if (!pending || payload?.requestId !== pending.requestId) return;
@@ -280,6 +314,7 @@ function acceptRecordingMetadataResult(payload) {
     pending.reject(new Error('Zoom recording metadata omitted an opaque row or occurrence ID.'));
     return;
   }
+  recordingOccurrenceBySourceId = new Map(rows.map(row => [row.sourceId, row.occurrenceId]));
   pending.resolve({ rows, pages: payload.pages, expectedCount: payload.expectedCount, terminalPage: payload.terminalPage });
 }
 
@@ -316,6 +351,25 @@ function installPageHook() {
   (document.head || document.documentElement).appendChild(script);
 }
 
+function deactivateTranscriptCapture(generation = activeTranscriptCapture?.generation, runId = activeTranscriptCapture?.runId) {
+  if (!activeTranscriptCapture || activeTranscriptCapture.generation !== generation || activeTranscriptCapture.runId !== runId) return false;
+  const captured = activeTranscriptCapture;
+  captured.cancelReady?.();
+  activeTranscriptCapture = null;
+  if (sourceWorkerRun?.runId === captured.runId && sourceWorkerRun.captureGeneration === captured.generation) sourceWorkerRun.captureGeneration = null;
+  try { window.postMessage({ source: 'ztd-recording-item-capture', active: false, generation: captured.generation, runId: captured.runId }, location.origin); } catch {}
+  transcriptResponseQueue = []; return true;
+}
+function waitForCaptureReady(capture, timeoutMs = 3000) {
+  return new Promise((resolve, reject) => {
+    const requestId = 'capture-' + crypto.randomUUID(); let done = false;
+    const finish = error => { if (done) return; done = true; clearTimeout(timer); window.removeEventListener('message', listener); capture.cancelReady = null; error ? reject(error) : resolve(); };
+    const listener = event => { const p = event.data?.payload; if (event.source === window && event.data?.source === 'zoom-transcript-extension' && event.data?.type === 'capture-ready' && p?.requestId === requestId && p?.runId === capture.runId && p?.generation === capture.generation && p?.meetingId === capture.meetingId && p?.sourceId === capture.sourceId) finish(); };
+    const timer = setTimeout(() => finish(new Error('Recording capture bridge did not acknowledge readiness within 3 seconds.')), timeoutMs);
+    capture.cancelReady = () => finish(new Error('Recording capture readiness cancelled.')); window.addEventListener('message', listener);
+    try { window.postMessage({ source: 'ztd-recording-item-capture', active: true, runId: capture.runId, generation: capture.generation, meetingId: capture.meetingId, sourceId: capture.sourceId, requestId }, location.origin); } catch (error) { finish(error); }
+  });
+}
 function clearTranscriptResponseQueue() {
   transcriptResponseQueue = [];
 }
@@ -364,14 +418,12 @@ function handleTranscriptResponseMessage(event) {
     chrome.runtime.sendMessage({ type: EXTENSION_NS + ':expectRecordingNative', payload: { url: data.payload?.url } }).catch(() => {});
     return;
   }
-  if (data.type === 'hook-debug') {
-    if (pendingTranscriptWaiters.length) {
-      log('Page hook observed network event', data.payload || {});
-    }
-    return;
-  }
+  if (data.type === 'hook-debug') return;
   if (data.type !== 'transcript-response') return;
   const payload = data.payload;
+  const active = activeTranscriptCapture;
+  const runMatches = sourceWorkerRun ? sourceWorkerRun.runId === active?.runId : String(active?.runId || '').startsWith('standalone-');
+  if (!active || payload?.meetingId !== active.meetingId || payload?.sourceId !== active.sourceId || payload?.runId !== active.runId || payload?.generation !== active.generation || !runMatches || !saveAllController.running) return;
   if (!payload?.text || payload.text.length < 10) return;
   if (pendingTranscriptWaiters.length) {
     pendingTranscriptWaiters.shift().resolve(payload);
@@ -433,8 +485,8 @@ function setSaveAllRunning(isRunning) {
   const saveAll = document.getElementById('ztd-save-all');
   const savePage = document.getElementById('ztd-save-page');
   const stop = document.getElementById('ztd-stop-save-all');
-  if (saveAll) saveAll.disabled = isRunning;
-  if (savePage) savePage.disabled = isRunning;
+  if (saveAll) saveAll.disabled = isRunning || !recordingCapability?.available;
+  if (savePage) savePage.disabled = isRunning || !recordingCapability?.available;
   if (stop) {
     stop.disabled = !isRunning;
     stop.classList.toggle('ztd-active', isRunning);
@@ -810,7 +862,13 @@ async function scanGuidedRecordingInventory() {
   if (Number.isFinite(expected) && expected !== assets.length) return { ok: false, assets, count: assets.length, pages, expectedCount: expected, error: 'Zoom reports ' + expected + ' rows but the authenticated API returned ' + assets.length + '.' };
   return { ok: true, assets, count: assets.length, pages, expectedCount: expected, availableCount, unavailableCount, exhausted: true };
 }
+function recordingFailureDiagnostic(error, fallbackStage = 'row-save') {
+  const message = String(error?.message || error || 'Unknown recording export error').replace(/https?:\/\/[^\s]+/g, '[redacted-url]').slice(0, 300);
+  return { stage: String(error?.ztdStage || fallbackStage).slice(0, 40), category: /occurrence|source ids|correlat/i.test(message) ? 'id-correlation' : /capture|readiness|ack/i.test(message) ? 'capture-bridge' : /timed out while waiting for transcript/i.test(message) ? 'response-timeout' : /save|download/i.test(message) ? 'file-save' : 'other', error: message };
+}
+
 async function saveTranscriptRow(item, plannedEntry) {
+  if (!recordingCapability?.available) { const error = new Error(recordingCapability?.reason || 'Recording export is unavailable.'); error.ztdStage = 'capability'; throw error; }
   clearTranscriptResponseQueue();
   log('About to click transcript row', {
     title: item.meta.title,
@@ -819,10 +877,27 @@ async function saveTranscriptRow(item, plannedEntry) {
     targetFilename: plannedEntry.targetFilename,
   });
   item.button.scrollIntoView({ block: 'center', inline: 'nearest' });
-  item.button.click();
-  log('Clicked transcript row', { title: item.meta.title, targetFilename: plannedEntry.targetFilename });
-  log('Waiting for transcript response', { title: item.meta.title, targetFilename: plannedEntry.targetFilename });
-  const response = await waitForTranscriptResponse(20000);
+  if (!RECORDING_CAPTURE_CONTRACT_VERIFIED) throw new Error('Recording transcript export is blocked because the observed request/response contract is unavailable.');
+  const runId = sourceWorkerRun?.runId || currentRunId || 'standalone-' + crypto.randomUUID();
+  const sourceId = String(item.key || '');
+  let occurrenceId;
+  try { occurrenceId = await getRecordingOccurrenceId(sourceId); }
+  catch (error) { error.ztdStage = 'occurrence-lookup'; throw error; }
+  const capture = { runId, generation: ++nextCaptureGeneration, meetingId: occurrenceId, sourceId };
+  if (!capture.meetingId || !capture.sourceId) { const error = new Error('Recording occurrence/source IDs are unavailable; capture cannot be safely correlated.'); error.ztdStage = 'occurrence-lookup'; throw error; }
+  activeTranscriptCapture = capture;
+  if (sourceWorkerRun?.runId === runId) sourceWorkerRun.captureGeneration = capture.generation;
+  let response;
+  try {
+    try { await waitForCaptureReady(capture, 3000); }
+    catch (error) { error.ztdStage = 'capture-ack'; throw error; }
+    if (activeTranscriptCapture !== capture || (sourceWorkerRun && sourceWorkerRun.runId !== runId)) { const error = new Error('Recording capture attempt became stale before the row could be opened.'); error.ztdStage = 'stale-check'; throw error; }
+    item.button.click();
+    log('Clicked transcript row', { title: item.meta.title, targetFilename: plannedEntry.targetFilename });
+    log('Waiting for transcript response', { title: item.meta.title, targetFilename: plannedEntry.targetFilename });
+    try { response = await waitForTranscriptResponse(20000); }
+    catch (error) { error.ztdStage = 'transcript-response'; throw error; }
+  } finally { capture.cancelReady?.(); deactivateTranscriptCapture(capture.generation, capture.runId); }
   log('Transcript response received', {
     title: item.meta.title,
     targetFilename: plannedEntry.targetFilename,
@@ -830,15 +905,16 @@ async function saveTranscriptRow(item, plannedEntry) {
     contentType: response?.contentType || '',
     textLength: response?.text?.length || 0,
   });
-  const saved = await saveTranscript({
+  let saved;
+  try { saved = await saveTranscript({
     filename: plannedEntry.targetFilename,
     content: response.text,
     mimeType: 'text/plain;charset=utf-8',
-  });
+  }); } catch (error) { error.ztdStage = 'file-save'; throw error; }
 
   const entry = {
     ...plannedEntry,
-    sourceUrl: response.url || null,
+    sourceUrl: safeDiagnosticUrl(response.url),
     sourceContentType: response.contentType || '',
     savedFilename: saved?.filename || plannedEntry.targetFilename,
     savedDownloadId: saved?.downloadId || null,
@@ -895,7 +971,12 @@ async function saveVisiblePage(settingsNow, workerRun = sourceWorkerRun) {
       targetFilename: plannedEntries[i]?.targetFilename || null,
     });
     previousItemStartMs = await waitForNextRecordingStart(previousItemStartMs);
-    try { results.push(await saveTranscriptRow(rowsNow[i], plannedEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); }
+    try { results.push(await saveTranscriptRow(rowsNow[i], plannedEntries[i])); } catch (error) {
+      const diagnostic = recordingFailureDiagnostic(error);
+      log('Recording row capture failed', diagnostic);
+      if (workerRun && !workerRun.firstError) workerRun.firstError = diagnostic;
+      results.push({ ok: false, error: diagnostic.error, diagnostic });
+    }
   }
 
   return {
@@ -956,17 +1037,19 @@ function renderPanel(rows, settings) {
         <label><input type="checkbox" id="ztd-source-notes"> My Notes transcripts</label>
       </div>
       <div class="ztd-controls">
+        <p id="ztd-recording-export-unavailable" role="status"></p>
         <div class="ztd-button-with-help">
           <button
             type="button"
             id="ztd-save-all"
+            disabled
             aria-describedby="ztd-save-all-tooltip"
           >Save selected sources</button>
           <span class="ztd-inline-tooltip" id="ztd-save-all-tooltip" role="tooltip">
             Saves every available transcript across all pages, not just the page you are viewing now.
           </span>
         </div>
-        <button type="button" class="ztd-secondary-action" id="ztd-save-page" title="Save only this source's visible list">Save this page</button>
+        <button type="button" disabled class="ztd-secondary-action" id="ztd-save-page" title="Save only this source's visible list">Save this page</button>
         <button type="button" class="ztd-danger" id="ztd-stop-save-all">Stop</button>
       </div>
       <div class="ztd-meta-section">
@@ -1013,6 +1096,8 @@ function renderPanel(rows, settings) {
     const sourceRecordings = panel.querySelector('#ztd-source-recordings');
     const sourceNotes = panel.querySelector('#ztd-source-notes');
     const storedSources = sourceApi?.normalizeSources(settings.sources);
+    const capabilityNote = panel.querySelector('#ztd-recording-export-unavailable');
+    if (capabilityNote && !recordingCapability?.available) capabilityNote.textContent = recordingCapability?.reason || 'Recording export is unavailable.';
     sourceRecordings.checked = storedSources?.recordings ?? true;
     sourceNotes.checked = storedSources?.myNotes ?? false;
     const persistSources = async () => {
@@ -1024,6 +1109,7 @@ function renderPanel(rows, settings) {
     sourceNotes.addEventListener('change', persistSources);
 
     recordingWorkerActions.all = async (workerRun = sourceWorkerRun) => {
+      if (!recordingCapability?.available) { showToast(recordingCapability?.reason || 'Recording export is unavailable.', 'warn', 8000); return { ok: false, error: recordingCapability?.reason }; }
       if (!workerRun) { await startCoordinatedSourceRun('all'); return; }
       if (sourceWorkerRun !== workerRun) throw new Error('Recording worker run is no longer current.');
       const settingsNow = workerRun.settings || await getSettings();
@@ -1159,10 +1245,10 @@ function renderPanel(rows, settings) {
               targetFilename: pageEntries[i]?.targetFilename || null,
             });
             previousItemStartMs = await waitForNextRecordingStart(previousItemStartMs);
-            try { results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i])); } catch (error) { results.push({ ok: false, error: String(error) }); } if (sourceWorkerRun === workerRun) { const progress = recordingProgressSnapshot(workerRun, results, skippedUnavailable); chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:sourceWorkerProgress', payload: { runId: workerRun.runId, progress, message: 'Processed ' + (progress.saved + progress.skipped + progress.failed) + (Number.isFinite(progress.total) ? ' of ' + progress.total : '') + ' recording transcripts.' } }).catch(() => {}); }
+            try { results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i])); } catch (error) { const diagnostic = recordingFailureDiagnostic(error); log('Recording row capture failed', diagnostic); if (!workerRun.firstError) workerRun.firstError = diagnostic; results.push({ ok: false, error: diagnostic.error, diagnostic }); } if (sourceWorkerRun === workerRun) { const progress = recordingProgressSnapshot(workerRun, results, skippedUnavailable); chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:sourceWorkerProgress', payload: { runId: workerRun.runId, progress, firstError: workerRun.firstError || null, message: 'Processed ' + (progress.saved + progress.skipped + progress.failed) + (Number.isFinite(progress.total) ? ' of ' + progress.total : '') + ' recording transcripts.' } }).catch(() => {}); } if (workerRun.diagnosticStopAfterFirstFailure && workerRun.firstError) break;
           }
 
-          if (workerRun.testLimit && results.length >= workerRun.testLimit) break;
+          if ((workerRun.testLimit && results.length >= workerRun.testLimit) || (workerRun.diagnosticStopAfterFirstFailure && workerRun.firstError)) break;
           const moved = await gotoNextPage();
           if (!moved.ok) break;
           savePageNumber += 1;
@@ -1173,7 +1259,7 @@ function renderPanel(rows, settings) {
         }
       } finally {
         const failed = results.filter(result => result && result.ok === false).length;
-        await completeRecordingWorker(workerRun, { saved: results.filter(result => result?.ok).length, skipped: skippedUnavailable, failed: failed + (workerError && !saveAllController.stopRequested ? 1 : 0), error: workerError, stopped: saveAllController.stopRequested });
+        await completeRecordingWorker(workerRun, { saved: results.filter(result => result?.ok).length, skipped: skippedUnavailable, failed: failed + (workerError && !saveAllController.stopRequested ? 1 : 0), error: workerError, firstError: workerRun.firstError || null, stopped: saveAllController.stopRequested });
       }
 
       stickyPanelMessage = null;
@@ -1191,6 +1277,7 @@ function renderPanel(rows, settings) {
     panel.querySelector('#ztd-save-all').addEventListener('click', () => recordingWorkerActions.all());
 
     recordingWorkerActions.page = async (workerRun = sourceWorkerRun) => {
+      if (!recordingCapability?.available) { showToast(recordingCapability?.reason || 'Recording export is unavailable.', 'warn', 8000); return { ok: false, error: recordingCapability?.reason }; }
       if (!workerRun) { await startCoordinatedSourceRun('page'); return; }
       if (sourceWorkerRun !== workerRun) throw new Error('Recording worker run is no longer current.');
       const settingsNow = workerRun.settings || await getSettings();
@@ -1297,7 +1384,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true }); return false;
   }
   if (message?.type === 'zoomTranscriptExtension:ping') {
-    sendResponse({ ok: true });
+    sendResponse({ ok: true, recordingCapabilityVersion: recordingCapability?.version ?? null, recordingCapabilityAvailable: recordingCapability?.available === true });
     return false;
   }
   if (message?.type === 'zoomTranscriptExtension:scanGuidedRecordings') {
@@ -1306,7 +1393,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === 'zoomTranscriptExtension:stopGuidedScan') { guidedRecordingScanStopped = true; const pending = pendingRecordingMetadataScan; if (pending) { clearTimeout(pending.timer); pendingRecordingMetadataScan = null; pending.reject(new Error('Scan stopped before metadata pagination was exhausted.')); } sendResponse({ ok: true }); return false; }
   if (message?.type === 'zoomTranscriptExtension:startGuidedDownload') {
-    startCoordinatedSourceRun('all', message.payload?.selected || [], message.payload?.totals || null);
+    if ((message.payload?.selected || []).includes('recordings') && !recordingCapability?.available) { sendResponse({ ok: false, error: recordingCapability?.reason || 'Recording export is unavailable.' }); return false; }
+    startCoordinatedSourceRun('all', message.payload?.selected || [], message.payload?.totals || null, message.payload?.diagnosticStopAfterFirstFailure === true);
     sendResponse({ ok: true });
     return false;
   }
@@ -1320,6 +1408,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
   if (message?.type === 'zoomTranscriptExtension:workerStartRecordings') {
+    if (!recordingCapability?.available) { sendResponse({ ok: false, error: recordingCapability?.reason || 'Recording export is unavailable.' }); return false; }
     const admission = admitRecordingWorkerRun(message.payload || {});
     if (!admission.accepted) {
       sendResponse({ ok: admission.duplicate === true, duplicate: admission.duplicate === true, error: admission.error || undefined });
@@ -1339,6 +1428,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'zoomTranscriptExtension:stopSourceWorker') {
     saveAllController.stopRequested = true;
     if (sourceWorkerRun) sourceWorkerRun.stopRequested = true;
+    deactivateTranscriptCapture(sourceWorkerRun?.captureGeneration, sourceWorkerRun?.runId);
+    flushPendingTranscriptWaiters(new Error('Recording capture stopped.'));
     sendResponse({ ok: true });
     return false;
   }

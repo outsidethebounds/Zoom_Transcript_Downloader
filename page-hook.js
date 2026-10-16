@@ -13,8 +13,20 @@
   };
 
   let directSaveWorker = false;
+  let activeCapture = null;
+  let nextCaptureGeneration = 0;
+  const sameCapture = capture => !!capture && !!activeCapture && activeCapture.generation === capture.generation && activeCapture.runId === capture.runId && activeCapture.meetingId === capture.meetingId && activeCapture.sourceId === capture.sourceId;
   window.addEventListener('message', event => {
-    if (event.source === window && event.data?.source === 'ztd-recording-worker-control') directSaveWorker = event.data.active === true;
+    if (event.source !== window) return;
+    if (event.data?.source === 'ztd-recording-worker-control') directSaveWorker = event.data.active === true;
+    if (event.data?.source === 'ztd-recording-item-capture') {
+      const message = event.data;
+      if (message.active === true && typeof message.runId === 'string' && typeof message.generation === 'number' && typeof message.meetingId === 'string' && typeof message.sourceId === 'string' && message.sourceId && message.generation > nextCaptureGeneration) {
+        nextCaptureGeneration = message.generation;
+        activeCapture = { runId: message.runId, generation: message.generation, meetingId: message.meetingId, sourceId: message.sourceId };
+        postEvent('capture-ready', { runId: message.runId, generation: message.generation, meetingId: message.meetingId, sourceId: message.sourceId, requestId: message.requestId });
+      } else if (message.active === false && activeCapture && message.generation === activeCapture.generation && message.runId === activeCapture.runId) activeCapture = null;
+    }
   });
   // Metadata-only bridge for the authenticated Zoom recording list. Never
   // forward the raw API response (or transcript/export payloads) across worlds.
@@ -93,10 +105,21 @@
     return originalAnchorClick.apply(this, args);
   };
 
-  const looksInteresting = (url, contentType = '') => {
-    try { if (new URL(url, location.href).pathname === RECORDING_LIST_PATH) return false; } catch {}
-    const haystack = `${url || ''} ${contentType || ''}`.toLowerCase();
-    return /transcript|download|caption|recording|meeting|plain|text|json|vtt|txt/.test(haystack);
+  // Verified from a native Zoom row action: POST XHR to this exact path with both
+  // occurrence ID (meetingId) and opaque row ID (sortKey); response is text/plain Blob.
+  const RECORDING_DOWNLOAD_PATH = '/rest/meeting/transcript/user/download';
+  const isVerifiedTranscriptRequest = (url, request) => {
+    try {
+      const parsed = new URL(url, location.href);
+      if (!/(?:^|\.)zoom\.us$/i.test(parsed.hostname) || parsed.pathname !== RECORDING_DOWNLOAD_PATH) return false;
+      if (request?.transport !== 'xhr' || String(request.method).toUpperCase() !== 'POST') return false;
+      const body = typeof request.body === 'string' ? JSON.parse(request.body) : request.body;
+      return !!request.capture
+        && typeof request.capture.meetingId === 'string' && request.capture.meetingId.length > 0
+        && typeof request.capture.sourceId === 'string' && request.capture.sourceId.length > 0
+        && body?.meetingId === request.capture.meetingId
+        && body?.sortKey === request.capture.sourceId;
+    } catch { return false; }
   };
 
   const readBlobAsText = async blob => {
@@ -117,42 +140,24 @@
     }
   };
 
-  const postPayload = async (response, url) => {
+  const postPayload = async (response, url, capture, request) => {
     try {
-      const clone = response.clone();
-      const text = await clone.text();
-      if (!text || text.length < 10) return;
+      if (!sameCapture(capture) || !isVerifiedTranscriptRequest(url, request)) return;
       const contentType = response.headers.get('content-type') || '';
-      postEvent('hook-debug', {
-        stage: 'fetch-text-captured',
-        url,
-        contentType,
-        textLength: text.length,
-      });
-      postEvent('transcript-response', {
-        url,
-        contentType,
-        text,
-      });
+      const text = await response.clone().text();
+      if (!sameCapture(capture) || !text || text.length < 10) return;
+      postEvent('transcript-response', { url, contentType, text, meetingId: capture.meetingId, runId: capture.runId, generation: capture.generation });
     } catch {}
   };
 
   const originalFetch = window.fetch.bind(window);
   window.fetch = async (...args) => {
+    const captureAtStart = activeCapture && { ...activeCapture };
+    const request = args[0];
+    const url = typeof request === 'string' ? request : request?.url || '';
+    const method = args[1]?.method || request?.method || 'GET';
     const response = await originalFetch(...args);
-    try {
-      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-      const contentType = response.headers.get('content-type') || '';
-      if (looksInteresting(url, contentType)) {
-        postEvent('hook-debug', {
-          stage: 'fetch-response-observed',
-          url,
-          status: response.status,
-          contentType,
-        });
-        postPayload(response, url);
-      }
-    } catch {}
+    if (sameCapture(captureAtStart) && isVerifiedTranscriptRequest(url, { transport: 'fetch', method, capture: captureAtStart, body: args[1]?.body })) postPayload(response, url, captureAtStart, { method });
     return response;
   };
 
@@ -160,52 +165,33 @@
   function PatchedXHR() {
     const xhr = new OriginalXHR();
     let requestUrl = '';
+    let requestMethod = '';
+    let captureAtStart = null;
+    let requestBody = null;
     const open = xhr.open;
     xhr.open = function(method, url, ...rest) {
+      requestMethod = String(method || 'GET').toUpperCase();
       requestUrl = url || '';
+      requestBody = null;
+      captureAtStart = null;
       return open.call(this, method, url, ...rest);
     };
+    const send = xhr.send;
+    xhr.send = function(...args) { requestBody = args[0] ?? null; captureAtStart = activeCapture && { ...activeCapture }; return send.apply(this, args); };
     xhr.addEventListener('load', () => {
       try {
+        const capture = captureAtStart;
         const contentType = xhr.getResponseHeader('content-type') || '';
-        if (!looksInteresting(requestUrl, contentType)) return;
-        postEvent('hook-debug', {
-          stage: 'xhr-response-observed',
-          url: requestUrl,
-          status: xhr.status,
-          contentType,
-          responseType: xhr.responseType || 'text',
-        });
+        if (!sameCapture(capture) || xhr.status !== 200 || xhr.responseType !== 'blob'
+          || !/^text\/plain(?:;|$)/i.test(contentType)
+          || !isVerifiedTranscriptRequest(requestUrl, { transport: 'xhr', method: requestMethod, body: requestBody, capture })) return;
         Promise.resolve().then(async () => {
           let text = '';
-          if (!xhr.responseType || xhr.responseType === 'text' || xhr.responseType === '') {
-            text = xhr.responseText || '';
-          } else if (xhr.responseType === 'blob') {
-            text = await readBlobAsText(xhr.response);
-          } else if (xhr.responseType === 'arraybuffer') {
-            text = readArrayBufferAsText(xhr.response);
-          }
-          if (!text || text.length < 10) {
-            postEvent('hook-debug', {
-              stage: 'xhr-text-missing',
-              url: requestUrl,
-              contentType,
-              responseType: xhr.responseType || 'text',
-            });
-            return;
-          }
-          postEvent('hook-debug', {
-            stage: 'xhr-text-captured',
-            url: requestUrl,
-            contentType,
-            responseType: xhr.responseType || 'text',
-            textLength: text.length,
-          });
-          postEvent('transcript-response', {
-            url: requestUrl,
-            contentType,
-            text,
-          });
+          if (!xhr.responseType || xhr.responseType === 'text' || xhr.responseType === '') text = xhr.responseText || '';
+          else if (xhr.responseType === 'blob') text = await readBlobAsText(xhr.response);
+          else if (xhr.responseType === 'arraybuffer') text = readArrayBufferAsText(xhr.response);
+          if (!sameCapture(capture) || !text || text.length < 10) return;
+          postEvent('transcript-response', { url: requestUrl, contentType, text, meetingId: capture.meetingId, sourceId: capture.sourceId, runId: capture.runId, generation: capture.generation });
         });
       } catch {}
     });

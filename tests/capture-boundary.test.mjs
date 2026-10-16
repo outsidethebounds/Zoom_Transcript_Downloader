@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const source=fs.readFileSync(new URL('../content.js',import.meta.url),'utf8');
+const start=source.indexOf('function redactDiagnosticValue');
+const end=source.indexOf('function setOutput',start);
+assert.ok(start>=0&&end>start,'production redaction/logger functions found');
+const logs=[],store={textContent:''};
+const context={logLines:[],document:{getElementById:()=>store},console:{log:(...args)=>logs.push(args)},Date,URL};
+vm.runInNewContext(source.slice(start,end)+';globalThis.actualLog=log;globalThis.actualSafeUrl=safeDiagnosticUrl;',context);
+const sentinel='SENTINEL_SIGNED_QUERY_FRAGMENT';
+const url='https://zoom.example/rest/transcript?marker='+sentinel+'#'+sentinel;
+context.actualLog('observed '+url,{url});
+const all=JSON.stringify({logs,debug:store.textContent,manifestSourceUrl:context.actualSafeUrl(url)});
+assert.equal(all.includes(sentinel),false,'sentinel absent from actual console, UI log, and persisted manifest URL helper');
+assert.match(all,/zoom.example\/rest\/transcript/);
+console.log('capture-boundary.test.mjs: all tests passed');

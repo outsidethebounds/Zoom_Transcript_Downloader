@@ -9,6 +9,7 @@ const notes = read('my-notes.js');
 const hook = read('page-hook.js');
 const workspace = read('workspace.js');
 const background = read('background.js');
+const inventoryLib = await import('../lib/guided-inventory.mjs');
 
 function blockAfter(source, marker) {
   const start = source.indexOf(marker);
@@ -29,7 +30,10 @@ test('guided metadata discovery is isolated from export APIs', () => {
   const recordingScan = blockAfter(content, 'async function scanGuidedRecordingInventory');
   const notesScan = blockAfter(notes, 'async function scanGuidedNotes');
   assert.match(recordingScan, /requestRecordingMetadataScan/);
-  assert.match(notesScan, /readRows\(\)/);
+  assert.match(notesScan, /collectNotes\(true\)/);
+  assert.match(notes, /nextPageTokenPresent === false/);
+  assert.match(notes, /assets\.length !== state\.totalRows/);
+  assert.doesNotMatch(notes, /unchangedAtBottom|exhaustionDeadline/);
   for (const scan of [recordingScan, notesScan]) {
     assert.doesNotMatch(scan, /downloads\.download|startSourceRun|startGuidedDownload|processNotes\(/);
   }
@@ -64,7 +68,16 @@ test('workspace starts a batch only from explicit reviewed-download path', () =>
   assert.match(saveFlow, /startGuidedDownload/);
   assert.match(saveFlow, /if\(activeRun\|\|scanBusy\)return/);
   assert.match(primary, /if\(scanBusy\|\|activeRun\)return/);
+  assert.match(primary, /canSaveReviewed\(inventory,chosen\)/, 'fully scanned selected source may proceed despite an incomplete other source');
+  assert.match(primary, /Uncheck incomplete sources to continue with fully scanned sources/);
   assert.match(primary, /await saveReviewed\(\)/);
+  assert.match(scanFlow, /Partial My Notes rows are for reference only/);
+  assert.match(saveFlow, /Select only sources with complete scans/);
+  const partial = inventoryLib.buildInventory({recordings:{selected:true,ok:true,assets:[{id:'recording-row',occurrenceId:'occ'}]},myNotes:{selected:true,ok:false,assets:[{id:'partial-note'}],error:'terminal signal unavailable'}});
+  assert.equal(partial.complete, false);
+  assert.equal(inventoryLib.canSaveReviewed(partial, ['recordings']), true, 'reviewed Recording-only export path remains enabled');
+  assert.equal(inventoryLib.canSaveReviewed(partial, ['recordings','myNotes']), false, 'partial Notes are not treated as exportable complete source');
+  assert.equal(inventoryLib.selectedAssets(partial, ['recordings']).length, 1);
   assert.equal((workspace.match(/startGuidedDownload/g) || []).length, 1);
   assert.match(background, /type === 'zoomTranscriptExtension:startSourceRun'/);
 });

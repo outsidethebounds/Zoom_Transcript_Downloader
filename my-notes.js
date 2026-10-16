@@ -1,5 +1,6 @@
 (() => {
   const NS = 'zoomTranscriptExtension';
+  const recordingCapability = globalThis.ZTDRecordingCapability;
   const PANEL_ID = 'ztd-notes-panel';
   const LIST_SELECTOR = '[role="row"][data-row="item"]';
   const sourcesApi = globalThis.ZTDSources;
@@ -19,6 +20,38 @@
   function setBusy(busy) { for (const id of ['ztd-notes-selected', 'ztd-notes-page']) { const b = panel?.querySelector('#' + id); if (b) b.disabled = busy; } }
   let pendingExportId = null;
   let cancelDirect = null;
+  let notesPaginationState = null;
+  let lastCollectedNotes = [];
+  window.addEventListener('message', event => {
+    if (event.source !== window || event.origin !== location.origin) return;
+    const data = event.data;
+    if (data?.source === 'ztd-notes-pagination-result' && data.payload && typeof data.payload.sequence === 'number') notesPaginationState = data.payload;
+  });
+  function requestNotesPaginationState(timeoutMs = 5000) {
+    return new Promise(resolve => {
+      const requestId = 'notes-state-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      const finish = value => { clearTimeout(timer); window.removeEventListener('message', listener); resolve(value); };
+      const listener = event => {
+        if (event.source === window && event.origin === location.origin && event.data?.source === 'ztd-notes-pagination-state' && event.data.requestId === requestId) finish(event.data.payload || null);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      window.addEventListener('message', listener);
+      window.postMessage({ source: 'ztd-notes-pagination-probe', requestId }, location.origin);
+    });
+  }
+  function waitForNotesPaginationAfter(sequence, timeoutMs = 15000) {
+    if (notesPaginationState?.sequence > sequence) return Promise.resolve(notesPaginationState);
+    return new Promise(resolve => {
+      const finish = value => { clearTimeout(timer); window.removeEventListener('message', listener); resolve(value); };
+      const listener = event => {
+        const state = event.data?.payload;
+        if (event.source === window && event.origin === location.origin && event.data?.source === 'ztd-notes-pagination-result' && state?.sequence > sequence) finish(state);
+      };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      window.addEventListener('message', listener);
+      if (notesPaginationState?.sequence > sequence) finish(notesPaginationState);
+    });
+  }
   function requestDirect(fileId) {
     if (stopRequested) return Promise.resolve({ kind: 'cancelled' });
     return new Promise(resolve => {
@@ -75,25 +108,42 @@
   }
   async function collectNotes(allPages) {
     const root = scrollRoot();
-    if (allPages) { root.scrollTop = 0; await sleep(300); }
+    if (!allPages) return readRows().map(note => ({ ...note, row: undefined }));
+    root.scrollTop = 0;
+    await sleep(250);
+    let state = await requestNotesPaginationState();
     const byKey = new Map();
-    let unchanged = 0;
-    for (let page = 0; page < (allPages ? 1000 : 1); page++) {
-      readRows().forEach(note => byKey.set(note.id || note.label, { ...note, row: undefined }));
-      if (!allPages) break;
-      const before = byKey.size;
+    const collectVisible = () => readRows().forEach(note => { const key = note.id || note.label; if (key) byKey.set(key, { ...note, row: undefined }); });
+    const fail = message => { const error = new Error(message); error.partialNotes = [...byKey.values()]; throw error; };
+    if (!state?.valid || state.method !== 'GET' || state.path !== '/api/file/meeting_notes/my_notes' || state.status !== 200 || !Array.isArray(state.requestKeys) || !state.requestKeys.includes('pageSize') || !Number.isFinite(state.totalRows)) fail('The authenticated My Notes API pagination state is unavailable; scan is incomplete.');
+    notesPaginationState = state;
+    lastCollectedNotes = [];
+    for (let steps = 0; steps < 10000; steps++) {
+      if (stopRequested || guidedNotesScanStopped) fail('Scan stopped before the My Notes cursor reached its terminal page.');
+      collectVisible();
+      const atBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 2;
+      if (atBottom && state.nextPageTokenPresent === false) {
+        if (byKey.size !== state.totalRows) fail('My Notes terminal page count did not match the unique metadata rows collected.');
+        lastCollectedNotes = [...byKey.values()];
+        return lastCollectedNotes;
+      }
+      if (atBottom && state.nextPageTokenPresent === true) {
+        const previousSequence = state.sequence;
+        window.postMessage({ source: 'ztd-notes-load-more' }, location.origin);
+        const next = await waitForNotesPaginationAfter(previousSequence);
+        if (!next?.valid || next.method !== 'GET' || next.path !== '/api/file/meeting_notes/my_notes' || next.status !== 200 || !Number.isFinite(next.totalRows)) fail('My Notes next-page request did not return a verified page.');
+        if (next.sequence <= previousSequence || next.totalRows < state.totalRows || (next.totalRows === state.totalRows && next.nextPageTokenPresent)) fail('My Notes pagination repeated or made no progress; scan is incomplete.');
+        state = next;
+        notesPaginationState = state;
+        continue;
+      }
       const oldTop = root.scrollTop;
       root.scrollTop = Math.min(root.scrollHeight, root.scrollTop + Math.max(250, Math.floor(root.clientHeight * .7)));
       root.dispatchEvent(new Event('scroll', { bubbles: true }));
-      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 2) window.postMessage({ source: 'ztd-notes-load-more' }, location.origin);
-      await sleep(850);
-      readRows().forEach(note => byKey.set(note.id || note.label, { ...note, row: undefined }));
-      if (byKey.size === before && root.scrollTop === oldTop) unchanged += 1;
-      else unchanged = 0;
-      if (unchanged >= 2) break;
-      if (stopRequested) break;
+      await sleep(250);
+      if (root.scrollTop === oldTop && !(root.scrollTop + root.clientHeight >= root.scrollHeight - 2)) fail('My Notes list stopped before its API terminal signal.');
     }
-    return [...byKey.values()];
+    fail('My Notes exceeded the safe page/scroll limit before terminal confirmation.');
   }
   async function scanGuidedNotes() {
     guidedNotesScanStopped = false;
@@ -108,36 +158,17 @@
       await sleep(300);
     }
     if (isLoginBlocker()) return { ok: false, needsUserAction: true, error: 'Sign in to My Notes in this tab, then rescan.' };
-    const root = scrollRoot();
-    root.scrollTop = 0;
-    await sleep(300);
-    const byId = new Map();
-    let unchangedAtBottom = 0;
-    let exhausted = false;
-    let pages = 0;
-    for (; pages < 1000; pages++) {
-      if (guidedNotesScanStopped) return { ok: false, stopped: true, assets: [...byId.values()], error: 'Scan stopped before list exhaustion.' };
-      for (const item of readRows()) {
-        const key = item.id || item.label;
-        if (key) byId.set(key, { sourceId: item.id || key, occurrenceId: item.occurrenceId || '', title: item.title || 'Untitled transcript', date: item.dateISO || '', available: null, availabilityReason: 'Availability is not probed during discovery; it will be confirmed only during an explicit save.' });
-      }
-      const before = byId.size;
-      const previousTop = root.scrollTop;
-      root.scrollTop = Math.min(root.scrollHeight, root.scrollTop + Math.max(250, Math.floor(root.clientHeight * .7)));
-      root.dispatchEvent(new Event('scroll', { bubbles: true }));
-      const atBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 2;
-      if (atBottom) window.postMessage({ source: 'ztd-notes-load-more' }, location.origin);
-      await sleep(850);
-      for (const item of readRows()) {
-        const key = item.id || item.label;
-        if (key) byId.set(key, { sourceId: item.id || key, occurrenceId: item.occurrenceId || '', title: item.title || 'Untitled transcript', date: item.dateISO || '', available: null, availabilityReason: 'Availability is not probed during discovery; it will be confirmed only during an explicit save.' });
-      }
-      if (byId.size === before && root.scrollTop === previousTop && atBottom) unchangedAtBottom++; else unchangedAtBottom = 0;
-      if (unchangedAtBottom >= 2) { exhausted = true; pages++; break; }
-      if (stopRequested) return { ok: false, stopped: true, assets: [...byId.values()], error: 'Scan stopped before list exhaustion.' };
+    let discoveredRows;
+    try { discoveredRows = await collectNotes(true); }
+    catch (error) {
+      const partial = Array.isArray(error.partialNotes) ? error.partialNotes : lastCollectedNotes;
+      const assets = partial.map(item => ({ sourceId: item.id || item.label, occurrenceId: item.occurrenceId || '', title: item.title || 'Untitled transcript', date: item.dateISO || '', available: null, availabilityReason: 'Availability is not probed during discovery; it will be confirmed only during an explicit save.' }));
+      return { ok: false, incomplete: true, stopped: guidedNotesScanStopped || stopRequested, error: String(error?.message || error), assets, count: assets.length, pages: notesPaginationState?.pages || 0, exhausted: false };
     }
-    if (!exhausted) return { ok: false, error: 'My Notes did not reach a verified terminal page within the safe scan limit.', assets: [...byId.values()] };
-    return { ok: true, assets: [...byId.values()], count: byId.size, pages, exhausted: true, listOrigin: location.origin };
+    const assets = discoveredRows.map(item => ({ sourceId: item.id || item.label, occurrenceId: item.occurrenceId || '', title: item.title || 'Untitled transcript', date: item.dateISO || '', available: null, availabilityReason: 'Availability is not probed during discovery; it will be confirmed only during an explicit save.' }));
+    const state = notesPaginationState;
+    if (!state?.valid || state.nextPageTokenPresent !== false || assets.length !== state.totalRows) return { ok: false, incomplete: true, error: 'My Notes cursor did not reach an authoritative terminal page with a matching inventory count.', assets, count: assets.length, pages: state?.pages || 0, exhausted: false };
+    return { ok: true, assets, count: assets.length, pages: state.pages, exhausted: true, listOrigin: location.origin };
   }
   function isLoginBlocker() {
     const path = location.pathname.toLowerCase();
@@ -377,14 +408,14 @@
     if (panel || activeWorker) return panel;
     panel = document.createElement('section');
     panel.id = PANEL_ID;
-    panel.innerHTML = '<strong>Zoom Transcript Downloader</strong><div class="ztd-source-options"><label><input type="checkbox" id="ztd-source-recordings"> Recording transcripts</label><label><input type="checkbox" id="ztd-source-notes"> My Notes transcripts</label></div><div class="ztd-source-actions"><button type="button" id="ztd-notes-selected">Save selected sources</button><button type="button" id="ztd-notes-page">Save this page</button><button type="button" id="ztd-notes-stop">Stop</button></div><div id="ztd-notes-status">Ready</div><pre id="ztd-notes-results"></pre>';
+    panel.innerHTML = '<strong>Zoom Transcript Downloader</strong><div class="ztd-source-options"><label title="'+(recordingCapability?.reason||'Recording export unavailable.')+'"><input type="checkbox" id="ztd-source-recordings" disabled> Recording transcripts (unavailable)</label><label><input type="checkbox" id="ztd-source-notes"> My Notes transcripts</label></div><p id="ztd-recording-export-unavailable" role="status">'+(recordingCapability?.reason||'Recording export unavailable.')+'</p><div class="ztd-source-actions"><button type="button" id="ztd-notes-selected">Save selected sources</button><button type="button" id="ztd-notes-page">Save this page</button><button type="button" id="ztd-notes-stop">Stop</button></div><div id="ztd-notes-status">Ready</div><pre id="ztd-notes-results"></pre>';
     document.body.appendChild(panel);
     panel.hidden = guidedWorkspace;
     const recording = panel.querySelector('#ztd-source-recordings');
     const notes = panel.querySelector('#ztd-source-notes');
     chrome.storage.local.get({ sources: sourcesApi.DEFAULT_SOURCES }).then(({ sources }) => {
       const value = sourcesApi.normalizeSources(sources);
-      recording.checked = value.recordings;
+      recording.checked = recordingCapability?.available ? value.recordings : false;
       notes.checked = value.myNotes;
     });
     const save = () => chrome.storage.local.set({ sources: { recordings: recording.checked, myNotes: notes.checked } });
@@ -394,6 +425,7 @@
       await save();
       const settings = await chrome.storage.local.get({ filenamePattern: '{date} - {time} - {title}', downloadSubfolder: '' });
       const selected = sourcesApi.orderedSources({ recordings: recording.checked, myNotes: notes.checked });
+      if (selected.includes('recordings') && !recordingCapability?.available) { status(recordingCapability?.reason || 'Recording export is unavailable.'); return; }
       setBusy(!!selected.length);
       status(selected.length ? 'Starting selected sources…' : 'Select at least one source.');
       const reply = await say('startSourceRun', { selected, settings, currentSource: 'myNotes', mode: 'all', originUrl: location.href });

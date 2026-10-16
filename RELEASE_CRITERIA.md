@@ -9,8 +9,8 @@ A usable Chrome/Edge extension for a signed-in Zoom user's accessible transcript
 1. First install opens the guided workspace; the toolbar button reopens it.
 2. User enters their Zoom company subdomain and selects Recording transcripts and/or My Notes transcripts.
 3. Both source lists are opened/reused and scanned for metadata only. Sign-in and SSO occur directly on Zoom.
-4. Both scans must be complete and the inventory reviewed. An incomplete/ambiguous scan blocks export.
-5. The user selects source(s) and explicitly chooses Download selected transcripts.
+4. Review source-specific completeness. Partial My Notes rows remain reference-only and are never treated as a complete/exportable inventory; a different fully scanned source may be selected alone.
+5. The user selects only complete source(s) and explicitly chooses Download selected transcripts. Recording has a live-verified POST-XHR/Blob contract (`/rest/meeting/transcript/user/download`, `meetingId` + `sortKey`, text/plain response) and strict request-to-row correlation. A user-assisted Edge acceptance run completed both selected sources; per-source terminal results reconciled with downloaded files in the dated Recordings and My Notes folders. Workspace reload recovered terminal totals. Chrome, Stop during an active export, rate-limit/expiry behavior, and broader native-wheel behavior remain untested.
 6. Results distinguish saved, unavailable, failed, and remaining items per source; attention-needed states are not success.
 
 ## Must-pass criteria
@@ -19,15 +19,15 @@ A usable Chrome/Edge extension for a signed-in Zoom user's accessible transcript
 - Never request or store a Zoom password.
 - Scan only accessible signed-in-user source lists; do not imply company-wide access.
 - Discovery reads metadata only and never exports transcript content or downloads files.
-- Transcript file content is accessed only after explicit user download action.
+- Transcript file content is accessed only after explicit user download action. Recording capture requires the verified exact Zoom route/method/ID-placement/response contract and strict request-to-row correlation.
 - Explain My Notes means transcript files only, not note text, AI summaries, or other documents.
 
 ### Inventory correctness
 - Recording pagination finishes only with Zoom's explicit terminal hasNextPage false signal and any authoritative total matches collected rows; no hardcoded live item counts.
-- Both source lists are retained separately. Only verified exact shared occurrence identifiers produce reciprocal association badges. Missing links remain uncertain, and exact unique-total availability is stated separately.
+- Both source lists are retained separately. An unverified My Notes terminal signal keeps its results explicitly partial and non-exportable; fully scanned sources can proceed without it. Only verified exact shared occurrence identifiers produce reciprocal association badges. Missing links remain uncertain, and exact unique-total availability is stated separately.
 - Source availability supports available/unavailable/unknown and is not conflated with cross-source matching.
 - Company or source URL changes after review invalidate the inventory before export.
-- Custom scroll rail keyboard and pointer behavior is verified; native-wheel and fresh SSO-to-export acceptance must be explicitly recorded before claiming them.
+- Custom scroll rail keyboard and pointer behavior is covered; native scrolling through the Recording inventory was verified live. Broader rail acceptance remains scoped to the tested interactions.
 
 ### Export and completion truth
 - No export starts during discovery or before review and explicit source selection.
@@ -44,4 +44,4 @@ A usable Chrome/Edge extension for a signed-in Zoom user's accessible transcript
 
 ## Verification status for 2026.10.1 source commit
 
-The repository has 20 Node test files with 54 mocked Node/DOM/Chrome test cases. On 2026-10-14, an authorized live metadata-only scan in the dedicated Chrome test profile completed Recording discovery (60 assets) and then paused at My Notes sign-in/page readiness; it was stopped before any export. The live check exposed that the legacy Recording panel had its hidden attribute set but still occupied 497 px because ID-based layout CSS overrode the browser default hidden rule. Version 2026.10.1 adds an explicit CSS override for both legacy panels and retains startup-state race protection. The fix is covered by a CSS rule test and a post-fix live check after reloading both source tabs: the Recording panel and a deliberately recreated My Notes panel each had hidden=true, computed display none, zero height, and zero client rects while the guided workspace was open. A 13-item pending value in mocked tests is not proof that a live 13-asset discrepancy was reconciled. Live Stop-during-export and fresh SSO-to-export acceptance remain unverified. Native-wheel behavior is not freshly confirmed. This source commit does not publish a store package or GitHub Release. See TESTING.md for the manual checklist.
+The repository has 24 Node test files with 70 mocked Node/DOM/Chrome test cases. User-assisted Edge acceptance completed a full export for both selected sources, with terminal results reconciled against saved files; workspace reload recovered terminal totals. A subsequent metadata scan was stopped while Notes discovery was incomplete. The UI retained the completed-source result, marked the incomplete source stopped, and reported that no export began; existing files remained unchanged. Chrome, Stop during active export, rate-limit/expiry behavior, and broader native-wheel behavior remain untested. This source commit does not publish a store package or GitHub Release. See TESTING.md for the manual checklist.

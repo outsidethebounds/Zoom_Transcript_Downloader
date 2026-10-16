@@ -40,7 +40,7 @@ test('Connect-only visibility and idle lock cover scans and exports',()=>{
  assert.ok(workspace.includes("$('download-settings').hidden=s!=='connect'"));
  assert.ok(workspace.includes('fields.disabled=scanBusy||activeRun'));
  assert.match(workspace,/finally\{stopPending=false;scanBusy=false;[^}]*updateDownloadSettingsLock()/);
- assert.ok(workspace.includes("setStage(hasError?'review':'save')"));
+ assert.match(workspace,/setStage\(recoveredWithoutInventory\?'connect':hasError\?'review':'save'\)/);
  const start=workspace.indexOf('function updateDownloadSettingsLock()');const end=workspace.indexOf('function renderDownloadSettings()',start);const disabled={};const fn=vm.runInNewContext(workspace.slice(start,end)+'\nupdateDownloadSettingsLock',{$:id=>disabled[id]|| (disabled[id]={}) ,scanBusy:true,activeRun:false});fn();assert.equal(disabled['download-settings-fields'].disabled,true);
 });
 

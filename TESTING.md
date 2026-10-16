@@ -12,7 +12,7 @@ Run from the repository root:
 	node --check --input-type=module < workspace.js
 	node --test tests/*.test.mjs
 
-The 2026.10.1 repository contains 20 Node test files and 54 test cases. Tests are mocked Node/DOM/Chrome tests, not a full authenticated browser suite. Coverage includes guided inventory and exact matching, review and target guards, metadata-only scan boundaries, explicit terminal paging/authoritative totals, bounded readiness retry and Stop, metadata bridge allowlisting, source sequencing, export outcomes, download routing, live guided-job presentation, legacy-panel hidden styling and startup races, tab ownership, and pacing.
+The repository contains 24 Node test files and 70 test cases. Tests are mocked Node/DOM/Chrome tests, not a cross-browser authenticated suite. Coverage includes guided inventory and exact matching, review and target guards, metadata-only scan boundaries, explicit terminal paging/authoritative totals, bounded readiness retry and Stop, metadata bridge allowlisting, source sequencing, export outcomes, download routing, live guided-job presentation, legacy-panel hidden styling and startup races, tab ownership, and pacing.
 
 ## Current pacing and guided status
 
@@ -25,9 +25,9 @@ The guided workspace shows a centered, high-contrast in-progress panel with live
 - Guided workflow code and tests enforce metadata-only discovery; exports start only after explicit reviewed-source selection.
 - Recording completeness requires an actual terminal signal, not an assumed live count. Empty terminal data is accepted only with hasNextPage false; reported totals must reconcile.
 - Both reciprocal association badges and source-list preservation are tested. Missing associations leave exact cross-source unique total unknown.
-- The inventory's custom scroll rail supports keyboard and pointer/track interaction. Live visual/metadata checks have been made; native-wheel behavior through the custom rail is not confirmed by fresh acceptance.
-- 2026-10-14 live check in the dedicated Chrome profile: guided metadata scan returned 60 Recording assets, then waited for My Notes sign-in/page readiness. It was stopped before review/export; no transcript bodies were opened and no downloads started. The check exposed a legacy panel with hidden=true but nonzero layout height because the ID-based panel CSS overrode the browser hidden rule. After the 2026.10.1 reload, both source tabs showed their legacy panel hidden with computed display none and zero layout height/rects; an explicit My Notes panel remount while guided remained active stayed hidden.
-- A 13-item pending value in mocked tests is not a reconciled live 13-asset discrepancy. Live Stop-during-export and fresh SSO-to-export acceptance remain unverified. Prior test or historical live evidence must not be described as proof of current fresh-login success.
+- The inventory's custom scroll rail supports keyboard and pointer/track interaction; native scrolling through the Recording inventory was verified live. Broader rail behavior remains untested.
+- User-assisted Edge acceptance completed an export for both selected sources. Per-source terminal results reconciled with saved files in the dated Recordings and My Notes folders, all saved text files were nonempty, and workspace reload recovered terminal totals.
+- A follow-up metadata scan Stop check retained the completed source result, marked incomplete Notes discovery stopped, and stated that no export began. Existing files remained unchanged. Chrome, Stop during active export, and rate-limit/expiry behavior remain untested.
 
 ## Manual acceptance checklist for a product release
 

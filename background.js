@@ -1,4 +1,5 @@
 import { createDownloadSuppression } from './lib/download-suppression.mjs';
+import './lib/recording-capability.js';
 import { createSourcePlan, orderSources } from './lib/source-plan.mjs';
 import { sendWhenContentReady } from './lib/content-readiness.mjs';
 import { datedBatchFolder, sourceFolderPath } from './lib/download-settings.mjs';
@@ -19,6 +20,7 @@ const CONTENT_SCRIPT_FILES = [
   'lib/runtime.js',
   'lib/sources.js',
   'lib/pacing.js',
+  'lib/recording-capability.js',
   'content.js',
 ];
 const NOTES_CONTENT_FILES = ['lib/sources.js', 'my-notes.js'];
@@ -259,10 +261,10 @@ function isNotesListUrl(url) {
   return typeof url === 'string' && NOTES_LIST_RE.test(url);
 }
 
-async function pingContentScript(tabId) {
+async function pingContentScript(tabId, requireRecordingCapability = false) {
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:ping' });
-    return !!response?.ok;
+    return !!response?.ok && (!requireRecordingCapability || (response.recordingCapabilityVersion === 1 && response.recordingCapabilityAvailable === true));
   } catch {
     return false;
   }
@@ -272,9 +274,10 @@ async function ensureExtensionUi(tabId, url) {
   const notesPage = typeof url === 'string' && NOTES_LIST_RE.test(url);
   if (!notesPage && !isTranscriptPageUrl(url)) return false;
   if (notesPage) await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['lib/notes-direct.js', 'my-notes-hook.js'] });
-  if (await pingContentScript(tabId)) return true;
+  const requireRecordingCapability = !notesPage;
+  if (await pingContentScript(tabId, requireRecordingCapability)) return true;
   await injectContentScript(tabId, notesPage);
-  return await pingContentScript(tabId);
+  return await pingContentScript(tabId, requireRecordingCapability);
 }
 
 async function injectContentScript(tabId, notesPage) {
@@ -285,7 +288,7 @@ async function injectContentScript(tabId, notesPage) {
 async function sendToReadyContentScript(tabId, url, message) {
   const notesPage = isNotesListUrl(url);
   return sendWhenContentReady({
-    ping: () => pingContentScript(tabId),
+    ping: () => pingContentScript(tabId, !notesPage),
     inject: async () => {
       // Stale tabs after an extension reload may lack the isolated listener.
       // These manifest-listed scripts have guards and are safe to reinject.
@@ -297,6 +300,14 @@ async function sendToReadyContentScript(tabId, url, message) {
   });
 }
 
+function sanitizeFailureDiagnostic(value) {
+  if (!value || typeof value !== 'object') return null;
+  const stages = new Set(['capability', 'occurrence-lookup', 'capture-ack', 'stale-check', 'transcript-response', 'file-save', 'row-save']);
+  const categories = new Set(['id-correlation', 'capture-bridge', 'response-timeout', 'file-save', 'other']);
+  const error = String(value.error || '').replace(/https?:\/\/[^\s]+/g, '[redacted-url]').slice(0, 300);
+  if (!error) return null;
+  return { stage: stages.has(value.stage) ? value.stage : 'row-save', category: categories.has(value.category) ? value.category : 'other', error };
+}
 function sanitizeSourceWorkerProgress(progress) {
   return Object.fromEntries(['saved', 'skipped', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, progress[key] == null ? null : Math.max(0, Number(progress[key]) || 0)]));
 }
@@ -318,10 +329,14 @@ async function finishSourceRun(run, extra = {}) {
   if (run.guided) {
     const rawResults = { ...(run.results || {}) };
     if (extra.interrupted && run.currentSource && !rawResults[run.currentSource]) { const progress = run.currentSource === 'myNotes' ? run.notesProgress : run.recordingsProgress; if (progress) rawResults[run.currentSource] = progress; }
-    const results = Object.fromEntries(Object.entries(rawResults).map(([source, result]) => [source, {
-      saved: Math.max(0, Number(result?.saved) || 0), skipped: Math.max(0, Number(result?.skipped) || 0),
-      failed: Math.max(0, Number(result?.failed) || 0), pending: Math.max(0, Number(result?.pending) || 0), error: Boolean(result?.error),
-    }]));
+    const results = Object.fromEntries(Object.entries(rawResults).map(([source, result]) => {
+      const firstError = sanitizeFailureDiagnostic(result?.firstError || run.firstError);
+      return [source, {
+        saved: Math.max(0, Number(result?.saved) || 0), skipped: Math.max(0, Number(result?.skipped) || 0),
+        failed: Math.max(0, Number(result?.failed) || 0), pending: Math.max(0, Number(result?.pending) || 0), error: Boolean(result?.error),
+        ...(firstError ? { firstError } : {}),
+      }];
+    }));
     await chrome.storage.session.set({ 'ztd:last-guided-terminal': { runId: run.runId, results, interrupted: extra.interrupted === true, stopped: extra.stopped === true, needsUserAction: Boolean(extra.needsUserAction), completedAt: Date.now() } }).catch(() => {});
   }
   if (run.workerTabId) sourceRunByWorkerTab.delete(run.workerTabId);
@@ -386,12 +401,13 @@ async function startSourceWorkerInTab(run, tabId, url) {
     // reinjection/messages; a reused legacy origin keeps its manual panel visible.
     const suppressLegacyPanel = run.guided || run.workerTabOwned === true;
     await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: suppressLegacyPanel } }).catch(() => {});
-    await ensureExtensionUi(tabId, url);
+    const extensionUiReady = await ensureExtensionUi(tabId, url);
+    if (!extensionUiReady && run.currentSource === 'recordings') throw new Error('The Zoom transcript tab has stale extension content. Refresh that tab, then retry; no export was started.');
     await chrome.tabs.sendMessage(tabId, { type: 'zoomTranscriptExtension:setGuidedWorkspace', payload: { active: suppressLegacyPanel } }).catch(() => {});
     const source = run.currentSource;
     const folderName = sourceFolderPath(run.rootFolder, source);
     const message = source === 'recordings'
-      ? { type: 'zoomTranscriptExtension:workerStartRecordings', payload: { runId: run.runId, mode: run.mode, folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope, total: run.totals?.recordings } }
+      ? { type: 'zoomTranscriptExtension:workerStartRecordings', payload: { runId: run.runId, mode: run.mode, folderName, settings: run.settings, testLimit: run.testLimit, diagnosticStopAfterFirstFailure: run.diagnosticStopAfterFirstFailure === true, scope: run.scope, total: run.totals?.recordings } }
       : { type: 'zoomTranscriptExtension:workerStartMyNotes', payload: { runId: run.runId, mode: run.mode, folderName, folderPath: folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope, total: run.totals?.myNotes } };
     await sendToReadyContentScript(tabId, url, message);
   } catch (error) {
@@ -405,6 +421,8 @@ async function startSourceWorkerInTab(run, tabId, url) {
 }
 async function beginSourceRun(payload, sender, sendResponse) {
   await recoveryReady;
+  const requested = orderSources(payload?.selected);
+  if (requested.includes('recordings') && !globalThis.ZTDRecordingCapability?.available) { sendResponse({ ok: false, error: globalThis.ZTDRecordingCapability?.reason || 'Recording export is unavailable.' }); return; }
   const originTabId = sender?.tab?.id;
   if (typeof originTabId !== 'number') { sendResponse({ ok: false, error: 'The source run must start from a Zoom tab.' }); return; }
   const selected = orderSources(payload?.selected);
@@ -420,7 +438,7 @@ async function beginSourceRun(payload, sender, sendResponse) {
   if (payload.currentSource === 'myNotes' && isNotesListUrl(originUrl)) notesUrl = originUrl;
   if (payload.currentSource === 'recordings' && isTranscriptPageUrl(originUrl)) recordingUrl = originUrl;
   const runId = 'sources-' + Date.now() + '-' + originTabId;
-  const run = { runId, originTabId, originUrl, rootFolder: datedBatchFolder(payload.settings?.downloadSubfolder), settings: payload.settings || {}, totals: payload.totals || {}, mode: payload.mode === 'page' ? 'page' : 'all', plan: createSourcePlan(selected), results: {}, scope: payload.scope || null, testLimit: Number.isInteger(payload.testLimit) ? Math.max(1, Math.min(payload.testLimit, 3)) : null, stopRequested: false, finished: false, workerTabId: null, workerStarted: false, guided: payload.guidedWorkspace === true, recordingUrl, notesUrl };
+  const run = { runId, originTabId, originUrl, rootFolder: datedBatchFolder(payload.settings?.downloadSubfolder), settings: payload.settings || {}, totals: payload.totals || {}, mode: payload.mode === 'page' ? 'page' : 'all', plan: createSourcePlan(selected), results: {}, scope: payload.scope || null, testLimit: Number.isInteger(payload.testLimit) ? Math.max(1, Math.min(payload.testLimit, 3)) : null, diagnosticStopAfterFirstFailure: payload.diagnosticStopAfterFirstFailure === true, stopRequested: false, finished: false, workerTabId: null, workerStarted: false, guided: payload.guidedWorkspace === true, recordingUrl, notesUrl };
   sourceRunsById.set(runId, run);
   sourceRunByOriginTab.set(originTabId, run);
   await persistRuns();
@@ -453,6 +471,8 @@ async function handleSourceWorkerResult(tabId, result) {
   const run = sourceRunByWorkerTab.get(tabId);
   if (!run || run.finished || result?.runId !== run.runId || result?.source !== run.currentSource) return;
   result = normalizeSourceWorkerResult(run, run.currentSource, result || {});
+  if (!run.firstError && result?.firstError) run.firstError = sanitizeFailureDiagnostic(result.firstError);
+  if (run.firstError) result.firstError = run.firstError;
   run.plan.complete(run.currentSource, result);
   run.results = run.plan.results;
   sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, result: run.results[run.currentSource], state: 'complete' });
@@ -606,13 +626,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     recoveryReady.then(async () => {
       const run = sourceRunByWorkerTab.get(_sender?.tab?.id);
       if (run && message.payload?.runId === run.runId) {
+        if (!run.firstError && message.payload?.firstError) run.firstError = sanitizeFailureDiagnostic(message.payload.firstError);
         if (message.payload?.progress) {
           const progress = message.payload.progress;
           const sanitized = sanitizeSourceWorkerProgress(progress);
           if (run.currentSource === 'myNotes') run.notesProgress = sanitized; else if (run.currentSource === 'recordings') run.recordingsProgress = sanitized;
           await persistRuns();
         }
-        sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'running', message: message.payload?.message || 'Working', progress: run.currentSource === 'myNotes' ? run.notesProgress || null : run.recordingsProgress || null });
+        sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, state: 'running', message: message.payload?.message || 'Working', progress: run.currentSource === 'myNotes' ? run.notesProgress || null : run.recordingsProgress || null, firstError: run.firstError || null });
       }
       sendResponse({ ok: !!run });
     }).catch(() => sendResponse({ ok: false }));

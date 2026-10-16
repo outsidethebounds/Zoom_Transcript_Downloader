@@ -7,8 +7,8 @@ Zoom Transcript Downloader is a Chrome and Microsoft Edge extension for saving t
 1. Install the extension. The extension-owned guided workspace opens on first install; later open it from the toolbar button.
 2. Enter your organization's Zoom subdomain and choose Recording transcripts and/or My Notes transcripts.
 3. Select **Open Zoom and scan sources**. The extension opens/reuses both Zoom lists in background tabs and scans accessible metadata only. Sign in directly on Zoom/SSO if prompted. Discovery does not export transcript content or download files.
-4. Review both completed source inventories. Incomplete scans block download; recognized sign-in/readiness waits are bounded to two minutes.
-5. Select the sources to export and explicitly choose **Download selected transcripts**. Review per-source saved, unavailable, failed, and remaining results.
+4. Review each source status. Recording uses Zoom’s explicit `hasNextPage=false` terminal page and total check. My Notes now uses the authenticated list API’s `nextPageToken` terminal signal and verifies the collected metadata count. Partial scans remain reference-only and cannot be exported as complete inventories.
+5. Select only sources marked complete and explicitly choose **Download selected transcripts**. The Recording request contract is verified, and a user-assisted Edge end-to-end run on 2026-10-16 completed exports from both selected sources. Per-source terminal totals matched Edge's completed download records and the nonempty TXT files in `Downloads/E2E-20261016/ZoomTranscripts-10162026/Recordings` and `Downloads/E2E-20261016/ZoomTranscripts-10162026/My Notes`. Chrome acceptance, Stop during an active export, and rate-limit/expiry handling remain untested; see [Testing and evidence limits](./TESTING.md).
 
 The scope is the signed-in user's accessible items, not a company-wide crawl. The extension never asks for or stores your password. It reads transcript metadata for review and transcript content only during a user-requested export. My Notes refers to transcript files, not note text, AI summaries, or other documents.
 
@@ -32,6 +32,6 @@ Chrome Web Store direct listing: https://chrome.google.com/webstore/detail/lbmej
 - [Release criteria](./RELEASE_CRITERIA.md)
 - [Roadmap and research backlog](./ROADMAP.md) (possible authenticated-context/tabless enhancement is not implemented)
 
-The printable PDFs are regenerated from the current guided-workflow HTML guides. Older screenshots may still show the former recordings-only UI; follow the current guides for the supported workflow.
+The printable PDFs have not been regenerated for the current Notes-completeness and Recording-endpoint compatibility limits; follow the current Markdown guides and Quick Start HTML. Older screenshots may still show the former recordings-only UI.
 
 Supported browsers: Chrome and Microsoft Edge. See [LICENSE](./LICENSE).
