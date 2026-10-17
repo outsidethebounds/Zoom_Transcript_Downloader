@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import sources from '../lib/sources.js';
 const code = fs.readFileSync(new URL('../my-notes.js', import.meta.url), 'utf8')
   .replace("  const initialGuidedWorkspaceStateVersion = guidedWorkspaceStateVersion;\n  chrome.runtime.sendMessage({ type: NS + ':getGuidedTabState' }).then(state => { if (shouldApplyInitialGuidedTabState(initialGuidedWorkspaceStateVersion)) guidedWorkspace = state?.guided === true; if (!guidedWorkspace) addPanel(); }).catch(() => { if (!guidedWorkspace) addPanel(); });\n})();", '  globalThis.adapter = { processNotes, readRows, findRowForLabel, clickTranscriptDownload, waitForDom };\n})();');
-async function run({ stopAfter = 0, missing = false, scope = null, stopAccessIndex = -1, loginAccessIndex = -1, routeFailureIndex = -1, allAccessible = false, direct = false, directKind = 'ready', stopDirect = false, expireOnce = false, expireAlways = false, lateDirect = false } = {}) {
+async function run({ stopAfter = 0, missing = false, scope = null, stopAccessIndex = -1, loginAccessIndex = -1, routeFailureIndex = -1, allAccessible = false, direct = false, directKind = 'ready', stopDirect = false, expireOnce = false, expireAlways = false, lateDirect = false, fallbackTimeout = false } = {}) {
   let directRequests = 0, directSaves = 0;
   let clock = 0, detail = null, count = 20, armed = null, saved = 0, root;
   const windowListeners = new Set();
@@ -40,6 +40,7 @@ async function run({ stopAfter = 0, missing = false, scope = null, stopAccessInd
     click() {
       assert.ok(armed && listeners.size, 'completion wait must be registered before clicking');
       assert.equal(location.pathname, '/' + detail.id, 'export belongs to selected stable ID');
+      if (fallbackTimeout) return;
       const ignored = { type: 'zoomTranscriptExtension:myNotesExportFinished', payload: { exportId: 'unrelated', ok: true } };
       for (const listener of [...listeners]) listener(ignored);
       for (const listener of [...listeners]) listener({ type: 'zoomTranscriptExtension:myNotesExportFinished', payload: { exportId: armed, ok: true } });
@@ -84,7 +85,7 @@ async function run({ stopAfter = 0, missing = false, scope = null, stopAccessInd
     history: { back() { queueMicrotask(() => { detail = null; location.pathname = '/allNotes'; count = 20; newRoot(); }); } },
     getComputedStyle: () => ({ overflowY: 'auto' }),
     Date: { now: () => clock },
-    setTimeout(f, ms) { if (ms < 35000) setImmediate(() => { clock += ms; f(); }); return 1; }, clearTimeout() {},
+    setTimeout(f, ms) { if (ms < 35000 || (fallbackTimeout && ms === 35000)) setImmediate(() => { clock += ms; f(); }); return 1; }, clearTimeout() {},
     MutationObserver: class { constructor(callback) { this.callback = callback; } observe() { observers.add(this); } disconnect() { observers.delete(this); } },
     Event: class {}, MouseEvent: class {}, PointerEvent: class {}, console,
   });
@@ -153,4 +154,10 @@ assert.equal(idless.directRequests,0);
 const alwaysExpired = await run({direct:true,expireAlways:true,scope:{notes:[{id:'opaque-1',label:'Note 1',title:'Note 1'}]}});
 assert.equal(alwaysExpired.result.failed,1);assert.equal(alwaysExpired.result.saved,0);assert.equal(alwaysExpired.directRequests,2);assert.equal(alwaysExpired.directSaves,2);
 assert.equal(alwaysExpired.result.fallbackSaved,0,'expired signed files never cause an extra native download');
+
+const timedOutFallback = await run({ fallbackTimeout: true });
+assert.equal(timedOutFallback.result.failed,1);
+assert.equal(timedOutFallback.result.needsUserAction.downloadAttention,true,'native My Notes fallback timeout asks for browser attention');
+assert.match(timedOutFallback.result.firstError.error,/browser download did not respond in time/i);
+assert.ok(timedOutFallback.messages.some(m=>m.type.endsWith(':cancelMyNotesExport')),'timed-out fallback cancels only its correlated export');
 console.log('notes-full-run.test.mjs: all tests passed');

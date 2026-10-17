@@ -18,11 +18,31 @@ function fixture(session = {}) {
     tabs:{onUpdated:event(),onRemoved:event(),onActivated:event(),query:async()=>[],create:async opts=>{const t={id:tabId++,status:'complete',url:opts.url};created.push({...t,...opts});return t;},get:async id=>created.find(t=>t.id===id),remove:async id=>removed.push(id),update:async()=>{},sendMessage:async(id,message)=>{sent.push({id,...message});return message.type==='zoomTranscriptExtension:ping'?{ok:true,recordingCapabilityVersion:1,recordingCapabilityAvailable:true}:{ok:true};}},
     downloads:{onCreated:event(),onChanged:event(),onDeterminingFilename:event(),cancel:async()=>{},removeFile:async()=>{},erase:async()=>{},download:async()=>1,search:async()=>[{state:'complete',fileSize:10}]},
   };
-  const ctx=vm.createContext({chrome,createSourcePlan,orderSources,sendWhenContentReady,createDownloadSuppression,shouldSuppressNativeTranscriptDownload,datedBatchFolder,sourceFolderPath,ZTDRecordingCapability:{available:true,reason:'test capability enabled'},Map,Promise,Date,URL,crypto,TextEncoder,Uint8Array,btoa,unescape,encodeURIComponent,console,setTimeout}); vm.runInContext(script,ctx);
+  const ctx=vm.createContext({chrome,createSourcePlan,orderSources,sendWhenContentReady,createDownloadSuppression,shouldSuppressNativeTranscriptDownload,datedBatchFolder,sourceFolderPath,ZTDRecordingCapability:{available:true,reason:'test capability enabled'},Map,Promise,Date,URL,crypto,TextEncoder,Uint8Array,btoa,unescape,encodeURIComponent,console,setTimeout,clearTimeout}); vm.runInContext(script,ctx);
   const run=(expression)=>vm.runInContext(expression,ctx);
   return {ctx,run,chrome,session,local,sent,created,removed,scriptCalls};
 }
 const tick=()=>new Promise(r=>setImmediate(r));
+{
+ const f=fixture();await f.run('recoveryReady');let resolveDownload;const cancelled=[];
+ f.chrome.downloads.download=()=>new Promise(resolve=>{resolveDownload=resolve});f.chrome.downloads.cancel=async id=>cancelled.push(id);
+ await assert.rejects(f.run("requestDownload({url:'data:text/plain,timeout',filename:'timeout.txt'},5)"),/browser download did not respond in time/i,'a hanging downloads.download call is bounded and actionable');
+ resolveDownload(91);await tick();await tick();assert.deepEqual(cancelled,[91],'a download that resolves after timeout is canceled');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ f.chrome.downloads.search=async()=>[{state:'in_progress'}];
+ await assert.rejects(f.run('waitForDownload(7,5)'),error=>error.downloadAttention===true,'an in-progress download is bounded by its completion deadline');
+ f.chrome.downloads.search=()=>new Promise(()=>{});
+ await assert.rejects(f.run('waitForDownload(8,5)'),error=>error.downloadAttention===true,'a hanging status query cannot defeat the overall completion deadline');
+ assert.equal(await f.run('waitForDownload(9,100,()=>true)').then(result=>result.cancelled),true,'Stop is observed before another status query');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ f.run("pendingExtensionOwnedFilenames.set('data:text/plain,old',['old.txt']); pendingExtensionOwnedFilenames.set('data:text/plain,new',['new.txt'])");
+ const oldName=f.run("(() => { let value; chooseFallbackFilename({url:'data:text/plain,old',byExtensionId:'extension'},suggestion=>value=suggestion); return value.filename })()");
+ assert.equal(oldName,'old.txt');assert.deepEqual(Array.from(f.run("pendingExtensionOwnedFilenames.get('data:text/plain,new')")),['new.txt'],'a late timed-out data URL cannot consume the newer request filename');
+}
 {
  const f=fixture();await f.run('recoveryReady');
  let pings=0;
@@ -73,6 +93,14 @@ const tick=()=>new Promise(r=>setImmediate(r));
  await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');f.ctx.rid=f.session['ztd:source-runs'][0].runId;
  await f.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",needsUserAction:{reason:"Sign in",url:"https://zoom.us/signin"}})');
  assert.equal(f.created.length,1);assert.equal(f.removed.length,0);assert.ok(f.sent.some(m=>m.type.endsWith('sourceRunPaused')));
+}
+{
+ const f=fixture();await f.run('recoveryReady');f.ctx.payload={selected:['recordings','myNotes'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{},guidedWorkspace:true};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');f.ctx.rid=f.session['ztd:source-runs'][0].runId;
+ await f.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",failed:1,firstError:{stage:"file-save",category:"file-save",error:"The browser download did not respond in time."},needsUserAction:{url:"https://zoom.us/recording/meeting/transcript",reason:"The browser download did not respond in time.",downloadAttention:true}})');
+ assert.equal(f.created.length,1,'a download timeout prevents the next selected source from opening');
+ assert.ok(f.sent.some(m=>m.type.endsWith('sourceRunPaused')),'the batch surfaces an action-needed terminal result');
+ assert.equal(f.session['ztd:last-guided-terminal'].results.recordings.firstError.error,'The browser download did not respond in time.','the timeout diagnosis survives workspace recovery');
 }
 {
  const f=fixture();await f.run('recoveryReady');

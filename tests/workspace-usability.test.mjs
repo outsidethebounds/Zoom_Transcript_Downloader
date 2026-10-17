@@ -109,6 +109,17 @@ test('results show the exact saved destination and warn before whole-source retr
   assert.match(elements['results-destinations'].children[0].children[1].textContent, /Destination unavailable.*check the browser Downloads folder/);
 });
 
+test('guided terminal keeps the browser download attention reason visible', () => {
+  const elements = { stop: { hidden: false }, 'job-stop': { disabled: false, textContent: '' }, review: { hidden: false } };
+  let message = '';
+  const fn = vm.runInNewContext(extract('function renderGuidedTerminal(', 'function reconcileGuidedRunState(', 'renderGuidedTerminal'), {
+    $: id => elements[id], hideJob() {}, stopPending: false, lastRunSavedSources: [], inventory: null,
+    setStage() {}, renderTerminalDetails() {}, status(value) { message = value; },
+  });
+  fn({ needsUserAction: true, results: { recordings: { failed: 1, firstError: { error: 'The browser download did not respond in time. Check for an outstanding browser save dialog.' } } } }, true);
+  assert.match(message, /browser download did not respond in time/i);
+});
+
 test('source retry restores the canonical source URL after sign-in and retains completed inventory', () => {
   const targetsForRetry = vm.runInNewContext(extract('function targetsForRetry(', 'async function retryIncompleteSource(', 'targetsForRetry'), { company: () => 'example' });
   const expected = targetsForRetry('myNotes', { company: 'example', notesTabUrl: 'https://us01mynotes.zoom.us/signin', notesListUrl: 'https://us01mynotes.zoom.us/allNotes' });

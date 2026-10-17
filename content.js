@@ -927,6 +927,13 @@ async function saveTranscriptRow(item, plannedEntry) {
   log('Saved transcript with final filename', entry);
 
   if (!saved?.ok) {
+    if (saved?.needsUserAction === true) {
+      const error = new Error(saved.error);
+      error.ztdStage = 'file-save';
+      error.stopSource = true;
+      error.downloadAttention = true;
+      throw error;
+    }
     return { ok: false, error: saved?.error || 'Failed to save transcript file.', entry };
   }
   return { ok: true, savedFilename: entry.savedFilename, targetFilename: plannedEntry.targetFilename };
@@ -978,6 +985,7 @@ async function saveVisiblePage(settingsNow, workerRun = sourceWorkerRun) {
       log('Recording row capture failed', diagnostic);
       if (workerRun && !workerRun.firstError) workerRun.firstError = diagnostic;
       results.push({ ok: false, error: diagnostic.error, diagnostic });
+      if (error?.stopSource) { workerRun.downloadBlocked = error.downloadAttention === true; break; }
     }
   }
 
@@ -1247,10 +1255,10 @@ function renderPanel(rows, settings) {
               targetFilename: pageEntries[i]?.targetFilename || null,
             });
             previousItemStartMs = await waitForNextRecordingStart(previousItemStartMs);
-            try { results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i])); } catch (error) { const diagnostic = recordingFailureDiagnostic(error); log('Recording row capture failed', diagnostic); if (!workerRun.firstError) workerRun.firstError = diagnostic; results.push({ ok: false, error: diagnostic.error, diagnostic }); } if (sourceWorkerRun === workerRun) { const progress = recordingProgressSnapshot(workerRun, results, skippedUnavailable); chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:sourceWorkerProgress', payload: { runId: workerRun.runId, progress, firstError: workerRun.firstError || null, message: 'Processed ' + (progress.saved + progress.skipped + progress.failed) + (Number.isFinite(progress.total) ? ' of ' + progress.total : '') + ' recording transcripts.' } }).catch(() => {}); } if (workerRun.diagnosticStopAfterFirstFailure && workerRun.firstError) break;
+            try { results.push(await saveTranscriptRow(rowsNow[i], pageEntries[i])); } catch (error) { const diagnostic = recordingFailureDiagnostic(error); log('Recording row capture failed', diagnostic); if (!workerRun.firstError) workerRun.firstError = diagnostic; results.push({ ok: false, error: diagnostic.error, diagnostic }); if (error?.stopSource) { workerRun.downloadBlocked = error.downloadAttention === true; break; } } if (sourceWorkerRun === workerRun) { const progress = recordingProgressSnapshot(workerRun, results, skippedUnavailable); chrome.runtime.sendMessage({ type: 'zoomTranscriptExtension:sourceWorkerProgress', payload: { runId: workerRun.runId, progress, firstError: workerRun.firstError || null, message: 'Processed ' + (progress.saved + progress.skipped + progress.failed) + (Number.isFinite(progress.total) ? ' of ' + progress.total : '') + ' recording transcripts.' } }).catch(() => {}); } if (workerRun.diagnosticStopAfterFirstFailure && workerRun.firstError) break;
           }
 
-          if ((workerRun.testLimit && results.length >= workerRun.testLimit) || (workerRun.diagnosticStopAfterFirstFailure && workerRun.firstError)) break;
+          if (workerRun.downloadBlocked || (workerRun.testLimit && results.length >= workerRun.testLimit) || (workerRun.diagnosticStopAfterFirstFailure && workerRun.firstError)) break;
           const moved = await gotoNextPage();
           if (!moved.ok) break;
           savePageNumber += 1;
@@ -1261,7 +1269,7 @@ function renderPanel(rows, settings) {
         }
       } finally {
         const failed = results.filter(result => result && result.ok === false).length;
-        await completeRecordingWorker(workerRun, { saved: results.filter(result => result?.ok).length, skipped: skippedUnavailable, failed: failed + (workerError && !saveAllController.stopRequested ? 1 : 0), error: workerError, firstError: workerRun.firstError || null, stopped: saveAllController.stopRequested });
+        await completeRecordingWorker(workerRun, { saved: results.filter(result => result?.ok).length, skipped: skippedUnavailable, failed: failed + (workerError && !saveAllController.stopRequested ? 1 : 0), error: workerError, firstError: workerRun.firstError || null, needsUserAction: workerRun.downloadBlocked ? { url: location.href, reason: workerRun.firstError?.error, downloadAttention: true } : null, stopped: saveAllController.stopRequested });
       }
 
       stickyPanelMessage = null;

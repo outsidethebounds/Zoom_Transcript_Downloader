@@ -29,7 +29,7 @@ const observedDownloads = [];
 let activeBatchFolderName = null;
 let activeBatchMode = 'legacy';
 let activeBatchTabId = null;
-const pendingExtensionOwnedFilenames = [];
+const pendingExtensionOwnedFilenames = new Map();
 const expectedNotesExportsByTab = new Map();
 const notesDownloadsById = new Map();
 let claimedNotesDownloadId = null;
@@ -40,6 +40,49 @@ const sourceRunByWorkerTab = new Map();
 let guidedWorkspaceTabId = null;
 const guidedSourceTabIds = new Set();
 let persistQueue = Promise.resolve();
+const DOWNLOAD_REQUEST_TIMEOUT_MS = 30000;
+const DOWNLOAD_ATTENTION_ERROR = 'The browser download did not respond in time. Check for an outstanding browser save dialog or Downloads item, close or cancel it if needed, then retry this source.';
+function requestDownload(options, timeoutMs = DOWNLOAD_REQUEST_TIMEOUT_MS) {
+  let timedOut = false;
+  let timer;
+  const request = Promise.resolve().then(() => chrome.downloads.download(options)).then(id => {
+    // A browser may resolve the API call after our bounded wait. If so, cancel
+    // the late download so the worker cannot move on and misattribute it.
+    if (timedOut && Number.isInteger(id)) cancelDownload(id);
+    return id;
+  });
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => { timedOut = true; const error = new Error(DOWNLOAD_ATTENTION_ERROR); error.downloadAttention = true; reject(error); }, timeoutMs);
+  });
+  return Promise.race([request, timeout]).finally(() => clearTimeout(timer));
+}
+async function cancelDownload(id) {
+  let timer;
+  await Promise.race([chrome.downloads.cancel(id).catch(() => {}), new Promise(resolve => { timer = setTimeout(resolve, 1000); })]);
+  clearTimeout(timer);
+}
+async function waitForDownload(id, timeoutMs, shouldCancel = () => false) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (shouldCancel()) return { cancelled: true };
+    let timer;
+    const remaining = Math.min(1000, deadline - Date.now());
+    const found = await Promise.race([
+      chrome.downloads.search({ id }),
+      new Promise((_, reject) => { timer = setTimeout(() => { const error = new Error('Download status poll timed out.'); error.searchPollTimeout = true; reject(error); }, remaining); }),
+    ]).finally(() => clearTimeout(timer)).catch(error => {
+      if (error?.searchPollTimeout) return null;
+      throw error;
+    });
+    if (!found || !found.length) { await new Promise(resolve => setTimeout(resolve, Math.min(100, Math.max(0, deadline - Date.now())))); continue; }
+    const [item] = found;
+    if (shouldCancel()) return { cancelled: true };
+    if (item?.state === 'complete') return item;
+    if (item?.state === 'interrupted') throw new Error('Transcript download interrupted.');
+    await new Promise(resolve => setTimeout(resolve, Math.min(100, Math.max(0, deadline - Date.now()))));
+  }
+  const error = new Error(DOWNLOAD_ATTENTION_ERROR); error.downloadAttention = true; throw error;
+}
 function persistRuns() {
   const snapshots = [...sourceRunsById.values()].filter(r => !r.finished).map(r => ({ ...r, plan: r.plan.snapshot() }));
   persistQueue = persistQueue.catch(() => {}).then(() => chrome.storage.session.set({ 'ztd:source-runs': snapshots }));
@@ -173,19 +216,22 @@ async function saveMyNotesDirect(payload, sender) {
     const sourceUrl = url.href;
     directNoteFilenames.set(sourceUrl, folder + '/' + filename);
     try {
-      id = await chrome.downloads.download({ url: sourceUrl, filename: folder + '/' + filename, conflictAction: 'uniquify', saveAs: false });
+      id = await requestDownload({ url: sourceUrl, filename: folder + '/' + filename, conflictAction: 'uniquify', saveAs: false });
       url = null; // Never persist or log the signed URL.
-      const deadline = Date.now() + 35000;
-      while (Date.now() < deadline) {
-        const [item] = await chrome.downloads.search({ id });
-        if (item?.state === 'complete') return item.fileSize === 0 ? { ok: false } : { ok: true, downloadId: id };
-        if (item?.state === 'interrupted') return { ok: false, expired: ['SERVER_UNAUTHORIZED', 'SERVER_FORBIDDEN'].includes(item.error) };
-        if (run.stopRequested) { await chrome.downloads.cancel(id).catch(() => {}); return { ok: false, cancelled: true }; }
-        await new Promise(resolve => setTimeout(resolve, 100));
+      try {
+        const item = await waitForDownload(id, 35000, () => run.stopRequested);
+        if (item.cancelled) { await cancelDownload(id); return { ok: false, cancelled: true }; }
+        return item.fileSize === 0 ? { ok: false } : { ok: true, downloadId: id };
+      } catch (error) {
+        if (run.stopRequested) { await cancelDownload(id); return { ok: false, cancelled: true }; }
+        if (/interrupted/i.test(String(error?.message || error))) {
+          const [item] = await Promise.race([chrome.downloads.search({ id }).catch(() => []), new Promise(resolve => setTimeout(() => resolve([]), 1000))]);
+          return { ok: false, expired: ['SERVER_UNAUTHORIZED', 'SERVER_FORBIDDEN'].includes(item?.error) };
+        }
+        await cancelDownload(id);
+        throw error;
       }
-      await chrome.downloads.cancel(id).catch(() => {});
-      return { ok: false };
-    } catch { return { ok: false }; }
+    } catch (error) { return { ok: false, error: String(error?.message || error), needsUserAction: error?.downloadAttention === true }; }
     finally { directNoteFilenames.delete(sourceUrl); }
   })();
   directNoteExports.set(key, operation);
@@ -219,7 +265,9 @@ function chooseNotesExport(item, expected, suggest) {
 }
 function chooseFallbackFilename(item, suggest) {
   if (isExtensionOwnedDownload(item)) {
-    const hintedFilename = pendingExtensionOwnedFilenames.shift();
+    const pending = pendingExtensionOwnedFilenames.get(item.url);
+    const hintedFilename = pending?.shift();
+    if (pending && !pending.length) pendingExtensionOwnedFilenames.delete(item.url);
     if (hintedFilename) { suggest({ filename: hintedFilename, conflictAction: 'uniquify' }); return; }
   }
   if (item.tabId !== activeBatchTabId || !activeBatchFolderName || !looksLikeZoomTranscriptDownload(item)) { suggest(); return; }
@@ -473,6 +521,9 @@ async function handleSourceWorkerResult(tabId, result) {
   result = normalizeSourceWorkerResult(run, run.currentSource, result || {});
   if (!run.firstError && result?.firstError) run.firstError = sanitizeFailureDiagnostic(result.firstError);
   if (run.firstError) result.firstError = run.firstError;
+  if (result?.downloadAttention === true || result?.needsUserAction?.downloadAttention === true || /browser download did not respond in time/i.test(result?.firstError?.error || '')) {
+    result.needsUserAction = { url: run.currentSource === 'recordings' ? run.recordingUrl : run.notesUrl, reason: result.firstError?.error || DOWNLOAD_ATTENTION_ERROR, downloadAttention: true };
+  }
   run.plan.complete(run.currentSource, result);
   run.results = run.plan.results;
   sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, result: run.results[run.currentSource], state: 'complete' });
@@ -671,6 +722,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     expectedNotesExportsByTab.delete(tabId);
     chrome.storage.session.remove(noteExportKey(tabId)).then(() => sendResponse({ ok: true })); return true;
   }
+  if (message?.type === 'zoomTranscriptExtension:cancelMyNotesExport') {
+    const tabId = _sender?.tab?.id;
+    const exportId = String(message.payload?.exportId || '');
+    chrome.storage.session.get(null).then(stored => {
+      const ids = new Set([...notesDownloadsById.entries()].filter(([, item]) => item.exportId === exportId && item.tabId === tabId).map(([id]) => id));
+      for (const [key, item] of Object.entries(stored)) {
+        if (key.startsWith('ztd:notes-download:') && item?.exportId === exportId && item?.tabId === tabId) {
+          const id = Number(key.slice('ztd:notes-download:'.length)); if (Number.isInteger(id)) ids.add(id);
+        }
+      }
+      return Promise.all([...ids].map(cancelDownload)).then(() => ids.size);
+    }).then(cancelled => sendResponse({ ok: true, cancelled })).catch(() => sendResponse({ ok: false })); return true;
+  }
   if (message?.type === 'zoomTranscriptExtension:expectMyNotesExport') {
     const tabId = _sender?.tab?.id;
     if (typeof tabId !== 'number' || !sourceRunByWorkerTab.has(tabId) || !message.payload?.filename || !message.payload?.folderPath) {
@@ -711,7 +775,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     activeBatchMode = 'legacy';
     activeBatchTabId = null;
     chrome.storage.session.remove('ztd:recording-batch').catch(() => {});
-    pendingExtensionOwnedFilenames.length = 0;
+    pendingExtensionOwnedFilenames.clear();
     sendResponse({ ok: true });
     return false;
   }
@@ -719,21 +783,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const { filename, content, mimeType } = message.payload || {};
     const url = makeDataUrl(content || '', mimeType || 'text/plain;charset=utf-8');
     const downloadFilename = getBatchDownloadPath(filename || '');
-    pendingExtensionOwnedFilenames.push(downloadFilename);
-    chrome.downloads.download({ url, filename: downloadFilename, saveAs: false, conflictAction: 'uniquify' })
+    const pendingNames = pendingExtensionOwnedFilenames.get(url) || [];
+    pendingNames.push(downloadFilename);
+    pendingExtensionOwnedFilenames.set(url, pendingNames);
+    requestDownload({ url, filename: downloadFilename, saveAs: false, conflictAction: 'uniquify' })
       .then(async downloadId => {
-        const deadline = Date.now() + 30000;
-        while (Date.now() < deadline) {
-          const [item] = await chrome.downloads.search({ id: downloadId });
-          if (item?.state === 'complete') { sendResponse({ ok: true, downloadId, filename: downloadFilename }); return; }
-          if (item?.state === 'interrupted') throw new Error('Transcript download interrupted.');
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        throw new Error('Transcript download did not complete within 30 seconds.');
+        try { await waitForDownload(downloadId, 30000); }
+        catch (error) { await cancelDownload(downloadId); throw error; }
+        sendResponse({ ok: true, downloadId, filename: downloadFilename });
       })
       .catch(error => {
-        pendingExtensionOwnedFilenames.pop();
-        sendResponse({ ok: false, error: String(error), filename: downloadFilename });
+        const pending = pendingExtensionOwnedFilenames.get(url) || [];
+        const index = pending.lastIndexOf(downloadFilename);
+        if (index >= 0) pending.splice(index, 1);
+        if (!pending.length) pendingExtensionOwnedFilenames.delete(url);
+        sendResponse({ ok: false, error: String(error), needsUserAction: error?.downloadAttention === true, filename: downloadFilename });
       });
     return true;
   }

@@ -10,3 +10,4 @@
 .settings-discard{border:1px solid #cbd5e1;border-radius:9px;padding:9px 13px;background:#fff;color:#334155;font:600 12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;cursor:pointer}.settings-discard:disabled{opacity:.5;cursor:not-allowed}
 
 #recordings-status[data-state=incomplete],#notes-status[data-state=incomplete]{color:#b42318}
+.download-save-reminder{grid-column:1/-1;margin:5px 0 0;padding-top:8px;border-top:1px solid #e8eef7}

@@ -16,6 +16,8 @@ A verified exact shared occurrence ID may produce a reciprocal **Also in My Note
 
 Files are saved beneath Downloads in a date-stamped ZoomTranscripts-MMDDYYYY folder with separate Recordings and My Notes subfolders. Existing files are preserved and conflicts uniquified. The collapsible Download settings section on Connect (also available in the legacy page panel) controls the filename pattern, optional Downloads subfolder, and Recording meeting-ID suffix. Changes are explicitly saved and apply to future runs.
 
+For unattended batches, open browser **Settings > Downloads** and turn off **Ask where to save each file** before downloading; restore it afterward if you prefer. The workspace repeats this reminder beside the destination. A browser save prompt may still require attention, and a download request that does not respond in time is reported so the affected source stops instead of continuing through more files.
+
 ## Install
 
 Chrome Web Store direct listing: https://chrome.google.com/webstore/detail/lbmejjnmnbjnoahehjfmhaiheopkgcdg . It may be private/unlisted. Edge can install Chrome Web Store extensions if allowed. For manual install, extract the package, open chrome://extensions or edge://extensions, enable Developer mode, choose Load unpacked, and select the folder containing manifest.json.

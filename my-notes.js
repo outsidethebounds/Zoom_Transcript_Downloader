@@ -82,7 +82,7 @@
       if (saved?.ok) return { kind: 'saved' };
       if (saved?.cancelled || stopRequested) return { kind: 'cancelled' };
       if (saved?.expired && !refresh) continue;
-      return { kind: 'failed' };
+      return { kind: 'failed', error: saved?.error || undefined, needsUserAction: saved?.needsUserAction === true };
     }
   }
   window.addEventListener('message', event => {
@@ -328,7 +328,7 @@
             result.processed += 1;
             if (direct.kind === 'saved') { result.saved += 1; result.directSaved += 1; result.eligible += 1; }
             else if (direct.kind === 'inaccessible') { result.skipped += 1; const reason = 'Export denied or transcript unavailable (HTTP ' + direct.status + ').'; result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1; }
-            else { result.failed += 1; result.error = direct.kind === 'rateLimit' ? 'Zoom rate limit reached; stopped after bounded Retry-After retries. Retry My Notes only later.' : 'Authenticated My Notes export failed; stopped to avoid duplicate or misattributed downloads. Retry My Notes only.'; break; }
+            else { result.failed += 1; result.error = direct.error || (direct.kind === 'rateLimit' ? 'Zoom rate limit reached; stopped after bounded Retry-After retries. Retry My Notes only later.' : 'Authenticated My Notes export failed; stopped to avoid duplicate or misattributed downloads. Retry My Notes only.'); result.firstError = { stage: 'file-save', category: 'file-save', error: result.error }; if (direct.needsUserAction) result.needsUserAction = { url: location.origin + location.pathname, reason: result.error, downloadAttention: true }; break; }
             await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: notesPending(config, result) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
             continue;
           }
@@ -380,7 +380,7 @@
         result.processed += 1;
         if (finished.ok) { result.saved += 1; result.fallbackSaved += 1; }
         else if (finished.timedOut && isLoginBlocker()) result.needsUserAction = { url: location.origin + location.pathname, reason: 'My Notes export is blocked by a sign-in or permission prompt.' };
-        else { result.failed += 1; result.error = finished.error || 'My Notes download was interrupted.'; if (finished.timedOut) { result.error = 'Export did not complete in time; stopped to avoid attributing a late download to another note.'; break; } }
+        else { result.failed += 1; result.error = finished.error || 'My Notes download was interrupted.'; if (finished.timedOut) { result.error = 'The browser download did not respond in time. Check for an outstanding browser save dialog or Downloads item, close or cancel it if needed, then retry this source.'; await say('cancelMyNotesExport', { exportId }); result.firstError = { stage: 'file-save', category: 'file-save', error: result.error }; result.needsUserAction = { url: location.origin + location.pathname, reason: result.error, downloadAttention: true }; break; } }
         await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: Math.max(0, result.discovered - result.saved - result.skipped - result.failed) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
         history.back();
         if (!await waitForList()) {
