@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import sources from '../lib/sources.js';
 const code = fs.readFileSync(new URL('../my-notes.js', import.meta.url), 'utf8')
   .replace("  const initialGuidedWorkspaceStateVersion = guidedWorkspaceStateVersion;\n  chrome.runtime.sendMessage({ type: NS + ':getGuidedTabState' }).then(state => { if (shouldApplyInitialGuidedTabState(initialGuidedWorkspaceStateVersion)) guidedWorkspace = state?.guided === true; if (!guidedWorkspace) addPanel(); }).catch(() => { if (!guidedWorkspace) addPanel(); });\n})();", '  globalThis.adapter = { processNotes, readRows, findRowForLabel, clickTranscriptDownload, waitForDom };\n})();');
-async function run({ stopAfter = 0, missing = false, scope = null, stopAccessIndex = -1, loginAccessIndex = -1, routeFailureIndex = -1, allAccessible = false, direct = false, directKind = 'ready', stopDirect = false, expireOnce = false, expireAlways = false, lateDirect = false, fallbackTimeout = false } = {}) {
+async function run({ stopAfter = 0, missing = false, scope = null, stopAccessIndex = -1, loginAccessIndex = -1, routeFailureIndex = -1, allAccessible = false, direct = false, directKind = 'ready', stopDirect = false, expireOnce = false, expireAlways = false, lateDirect = false, fallbackTimeout = false, savedRecordingOccurrenceIds = [], avoidDuplicateMeetings = true } = {}) {
   let directRequests = 0, directSaves = 0;
   let clock = 0, detail = null, count = 20, armed = null, saved = 0, root;
   const windowListeners = new Set();
@@ -13,6 +13,7 @@ async function run({ stopAfter = 0, missing = false, scope = null, stopAccessInd
   const notes = Array.from({ length: 32 }, (_, index) => ({
     id: 'opaque-' + index,
     label: index % 5 === 0 ? 'Undated note ' + index : 'Note ' + index + ' 2026-10-11 10:00(GMT-4:00)',
+    occurrenceId: index < 2 ? 'occ-saved' : index === 2 ? 'occ-failed' : '',
     // Production metadata mixes ordinary notes and meeting-linked notes; UI decides access.
     metadata: { hasPermission: index === 18 ? false : index === 30 ? undefined : true, recording: null },
   }));
@@ -26,7 +27,7 @@ async function run({ stopAfter = 0, missing = false, scope = null, stopAccessInd
   newRoot();
   const listRows = () => detail ? [] : notes.slice(0, count).filter(n => !missing || roots.length === 1 || n.id !== 'opaque-21').map(n => ({
     parentElement: root,
-    getAttribute: key => key === 'aria-label' ? n.label : key === 'data-ztd-note-id' ? n.id : null,
+    getAttribute: key => key === 'aria-label' ? n.label : key === 'data-ztd-note-id' ? n.id : key === 'data-ztd-occurrence-id' ? n.occurrenceId : null,
     click() {
       detail = n; location.pathname = '/' + n.id; root.isConnected = false;
       const index = Number(n.id.split('-')[1]);
@@ -90,18 +91,34 @@ async function run({ stopAfter = 0, missing = false, scope = null, stopAccessInd
     Event: class {}, MouseEvent: class {}, PointerEvent: class {}, console,
   });
   vm.runInContext(code, context);
-  const result = await context.adapter.processNotes({ runId: 'production-full', mode: scope ? 'page' : 'all', scope, folderPath: 'Batch/My Notes', worker: true, settings: {} });
+  const result = await context.adapter.processNotes({ runId: 'production-full', mode: scope ? 'page' : 'all', scope, folderPath: 'Batch/My Notes', worker: true, settings: { avoidDuplicateMeetings }, avoidDuplicateMeetings, savedRecordingOccurrenceIds });
   return { result, messages, saved, directRequests, directSaves, roots, context, document, observers };
 }
 const full = await run();
-assert.deepEqual(JSON.parse(JSON.stringify({ saved: full.result.saved, skipped: full.result.skipped, failed: full.result.failed, processed: full.result.processed, discovered: full.result.discovered, eligible: full.result.eligible, pending: full.result.pending })),
-  { saved: 29, skipped: 3, failed: 0, processed: 29, discovered: 32, eligible: 29, pending: 0 });
+assert.deepEqual(JSON.parse(JSON.stringify({ saved: full.result.saved, skipped: full.result.skipped, duplicatesAvoided: full.result.duplicatesAvoided, failed: full.result.failed, processed: full.result.processed, discovered: full.result.discovered, eligible: full.result.eligible, pending: full.result.pending })),
+  { saved: 29, skipped: 3, duplicatesAvoided: 0, failed: 0, processed: 29, discovered: 32, eligible: 29, pending: 0 });
 assert.equal(full.saved, 29, 'one native export per successful note; no artificial testLimit/scope');
 assert.ok(full.roots.length > 30, 'SPA replaces root on every return, in the single fallback pass');
 assert.equal(full.messages.filter(m => m.type.endsWith(':expectMyNotesExport')).length, 29);
 assert.ok(full.messages.filter(m => m.type.endsWith(':expectMyNotesExport')).some(m => m.payload.filename.includes('unknown-date')), 'title-only rows remain in discovery');
 assert.equal(full.result.skipReasons['No transcript access control.'], 1);
 assert.equal(full.result.skipReasons['No enabled Download transcript control.'], 2);
+const deduped = await run({ savedRecordingOccurrenceIds: ['occ-saved'] });
+assert.equal(deduped.result.saved, 27, 'Notes rows are suppressed only when a Recording occurrence save was confirmed');
+assert.equal(deduped.result.duplicatesAvoided, 2, 'multiple Notes rows sharing one saved occurrence are both suppressed');
+assert.equal(deduped.result.discovered, 32, 'suppression does not reduce the reviewed inventory denominator');
+assert.equal(deduped.result.pending, 0, 'duplicate rows are included in final accounting');
+assert.equal(deduped.saved, 27);
+const fallbackAfterRecordingFailure = await run({ savedRecordingOccurrenceIds: [] });
+assert.equal(fallbackAfterRecordingFailure.result.saved, 29, 'recording failure/unavailability leaves every Notes row eligible');
+assert.equal(fallbackAfterRecordingFailure.result.duplicatesAvoided, 0);
+const optedOut = await run({ savedRecordingOccurrenceIds: ['occ-saved'], avoidDuplicateMeetings: false });
+assert.equal(optedOut.result.saved, 29, 'explicit opt-out exports both sources');
+assert.equal(optedOut.result.duplicatesAvoided, 0);
+const stoppedAfterDedupe = await run({ savedRecordingOccurrenceIds: ['occ-saved'], stopAfter: 1 });
+assert.equal(stoppedAfterDedupe.result.saved, 1);
+assert.equal(stoppedAfterDedupe.result.duplicatesAvoided, 2);
+assert.equal(stoppedAfterDedupe.result.pending, 29, 'pending retains original total minus duplicate rows and completed outcomes');
 const accessStop = await run({ stopAccessIndex: 2 });
 assert.equal(accessStop.result.stopped, true); assert.equal(accessStop.result.skipped, 0); assert.equal(accessStop.result.pending, 30);
 const login = await run({ loginAccessIndex: 2 });

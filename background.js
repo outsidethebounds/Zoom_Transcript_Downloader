@@ -9,6 +9,7 @@ const BASE_DEFAULTS = {
   downloadSubfolder: '',
   targetOs: 'macos',
   includeMeetingId: false,
+  avoidDuplicateMeetings: true,
   sources: { recordings: true, myNotes: false },
 };
 
@@ -357,7 +358,16 @@ function sanitizeFailureDiagnostic(value) {
   return { stage: stages.has(value.stage) ? value.stage : 'row-save', category: categories.has(value.category) ? value.category : 'other', error };
 }
 function sanitizeSourceWorkerProgress(progress) {
-  return Object.fromEntries(['saved', 'skipped', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, progress[key] == null ? null : Math.max(0, Number(progress[key]) || 0)]));
+  return Object.fromEntries(['saved', 'skipped', 'duplicatesAvoided', 'failed', 'processed', 'discovered', 'eligible', 'pending', 'directSaved', 'fallbackSaved'].map(key => [key, progress[key] == null ? null : Math.max(0, Number(progress[key]) || 0)]));
+}
+function sanitizeSavedOccurrenceIds(value, confirmedSavedCount = Number.POSITIVE_INFINITY) {
+  if (!Array.isArray(value)) return [];
+  const ids = [...new Set(value.map(id => typeof id === 'string' ? id.trim() : '').filter(Boolean))];
+  // A worker may omit opaque IDs, but it cannot confirm more saved meetings
+  // than its successful-save counter. Reject inconsistent sets as a whole;
+  // truncating would arbitrarily choose which Notes rows to suppress.
+  if (ids.length > Math.max(0, Number(confirmedSavedCount) || 0)) return [];
+  return ids;
 }
 function sourceRunNotice(run, type, payload = {}) {
   if (typeof run.originTabId !== 'number') return;
@@ -381,6 +391,7 @@ async function finishSourceRun(run, extra = {}) {
       const firstError = sanitizeFailureDiagnostic(result?.firstError || run.firstError);
       return [source, {
         saved: Math.max(0, Number(result?.saved) || 0), skipped: Math.max(0, Number(result?.skipped) || 0),
+        duplicatesAvoided: Math.max(0, Number(result?.duplicatesAvoided) || 0),
         failed: Math.max(0, Number(result?.failed) || 0), pending: Math.max(0, Number(result?.pending) || 0), error: Boolean(result?.error),
         ...(firstError ? { firstError } : {}),
       }];
@@ -456,7 +467,7 @@ async function startSourceWorkerInTab(run, tabId, url) {
     const folderName = sourceFolderPath(run.rootFolder, source);
     const message = source === 'recordings'
       ? { type: 'zoomTranscriptExtension:workerStartRecordings', payload: { runId: run.runId, mode: run.mode, folderName, settings: run.settings, testLimit: run.testLimit, diagnosticStopAfterFirstFailure: run.diagnosticStopAfterFirstFailure === true, scope: run.scope, total: run.totals?.recordings } }
-      : { type: 'zoomTranscriptExtension:workerStartMyNotes', payload: { runId: run.runId, mode: run.mode, folderName, folderPath: folderName, settings: run.settings, testLimit: run.testLimit, scope: run.scope, total: run.totals?.myNotes } };
+      : { type: 'zoomTranscriptExtension:workerStartMyNotes', payload: { runId: run.runId, mode: run.mode, folderName, folderPath: folderName, settings: run.settings, avoidDuplicateMeetings: run.settings?.avoidDuplicateMeetings !== false, savedRecordingOccurrenceIds: run.settings?.avoidDuplicateMeetings === false ? [] : sanitizeSavedOccurrenceIds(run.recordingSavedOccurrenceIds), testLimit: run.testLimit, scope: run.scope, total: run.totals?.myNotes } };
     await sendToReadyContentScript(tabId, url, message);
   } catch (error) {
     run.plan.complete(run.currentSource, { saved: 0, skipped: 0, failed: 1, error: 'Could not start the source worker: ' + String(error) });
@@ -486,7 +497,7 @@ async function beginSourceRun(payload, sender, sendResponse) {
   if (payload.currentSource === 'myNotes' && isNotesListUrl(originUrl)) notesUrl = originUrl;
   if (payload.currentSource === 'recordings' && isTranscriptPageUrl(originUrl)) recordingUrl = originUrl;
   const runId = 'sources-' + Date.now() + '-' + originTabId;
-  const run = { runId, originTabId, originUrl, rootFolder: datedBatchFolder(payload.settings?.downloadSubfolder), settings: payload.settings || {}, totals: payload.totals || {}, mode: payload.mode === 'page' ? 'page' : 'all', plan: createSourcePlan(selected), results: {}, scope: payload.scope || null, testLimit: Number.isInteger(payload.testLimit) ? Math.max(1, Math.min(payload.testLimit, 3)) : null, diagnosticStopAfterFirstFailure: payload.diagnosticStopAfterFirstFailure === true, stopRequested: false, finished: false, workerTabId: null, workerStarted: false, guided: payload.guidedWorkspace === true, recordingUrl, notesUrl };
+  const run = { runId, originTabId, originUrl, rootFolder: datedBatchFolder(payload.settings?.downloadSubfolder), settings: payload.settings || {}, totals: payload.totals || {}, mode: payload.mode === 'page' ? 'page' : 'all', plan: createSourcePlan(selected), results: {}, recordingSavedOccurrenceIds: [], scope: payload.scope || null, testLimit: Number.isInteger(payload.testLimit) ? Math.max(1, Math.min(payload.testLimit, 3)) : null, diagnosticStopAfterFirstFailure: payload.diagnosticStopAfterFirstFailure === true, stopRequested: false, finished: false, workerTabId: null, workerStarted: false, guided: payload.guidedWorkspace === true, recordingUrl, notesUrl };
   sourceRunsById.set(runId, run);
   sourceRunByOriginTab.set(originTabId, run);
   await persistRuns();
@@ -506,6 +517,8 @@ async function stopSourceRun(originTabId) {
 }
 function normalizeSourceWorkerResult(run, source, result = {}) {
   const normalized = { ...result };
+  normalized.duplicatesAvoided = Math.max(0, Number(normalized.duplicatesAvoided) || 0);
+  if (source === 'recordings') normalized.savedOccurrenceIds = sanitizeSavedOccurrenceIds(normalized.savedOccurrenceIds, normalized.saved);
   // Recording startup/planning failures can report a terminal error before a
   // row-level firstError exists. Mark it as worker-level rather than guessing
   // which stage failed; detailed row diagnostics always take precedence.
@@ -514,7 +527,7 @@ function normalizeSourceWorkerResult(run, source, result = {}) {
   }
   const total = Number(run?.totals?.[source]);
   if (Number.isFinite(total)) {
-    const accounted = Math.max(0, Number(normalized.saved) || 0) + Math.max(0, Number(normalized.skipped) || 0) + Math.max(0, Number(normalized.failed) || 0);
+    const accounted = Math.max(0, Number(normalized.saved) || 0) + Math.max(0, Number(normalized.skipped) || 0) + normalized.duplicatesAvoided + Math.max(0, Number(normalized.failed) || 0);
     const minimumPending = Math.max(0, total - accounted);
     if (!Number.isFinite(normalized.pending) || normalized.pending < minimumPending) normalized.pending = minimumPending;
   }
@@ -525,12 +538,16 @@ async function handleSourceWorkerResult(tabId, result) {
   const run = sourceRunByWorkerTab.get(tabId);
   if (!run || run.finished || result?.runId !== run.runId || result?.source !== run.currentSource) return;
   result = normalizeSourceWorkerResult(run, run.currentSource, result || {});
+  if (run.currentSource === 'recordings' && run.settings?.avoidDuplicateMeetings !== false) {
+    run.recordingSavedOccurrenceIds = sanitizeSavedOccurrenceIds([...(run.recordingSavedOccurrenceIds || []), ...result.savedOccurrenceIds]);
+  }
   if (!run.firstError && result?.firstError) run.firstError = sanitizeFailureDiagnostic(result.firstError);
   if (run.firstError) result.firstError = run.firstError;
   if (result?.downloadAttention === true || result?.needsUserAction?.downloadAttention === true || /browser download did not respond in time/i.test(result?.firstError?.error || '')) {
     result.needsUserAction = { url: run.currentSource === 'recordings' ? run.recordingUrl : run.notesUrl, reason: result.firstError?.error || DOWNLOAD_ATTENTION_ERROR, downloadAttention: true };
   }
-  run.plan.complete(run.currentSource, result);
+  const { savedOccurrenceIds: _savedOccurrenceIds, ...reportedResult } = result;
+  run.plan.complete(run.currentSource, reportedResult);
   run.results = run.plan.results;
   sourceRunNotice(run, 'sourceRunProgress', { source: run.currentSource, result: run.results[run.currentSource], state: 'complete' });
   const userAction = result?.needsUserAction;
@@ -687,6 +704,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (message.payload?.progress) {
           const progress = message.payload.progress;
           const sanitized = sanitizeSourceWorkerProgress(progress);
+          if (run.currentSource === 'recordings' && run.settings?.avoidDuplicateMeetings !== false) {
+            run.recordingSavedOccurrenceIds = sanitizeSavedOccurrenceIds([...(run.recordingSavedOccurrenceIds || []), ...sanitizeSavedOccurrenceIds(progress.savedOccurrenceIds, progress.saved)]);
+          }
           if (run.currentSource === 'myNotes') run.notesProgress = sanitized; else if (run.currentSource === 'recordings') run.recordingsProgress = sanitized;
           await persistRuns();
         }
@@ -794,7 +814,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     pendingExtensionOwnedFilenames.set(url, pendingNames);
     requestDownload({ url, filename: downloadFilename, saveAs: false, conflictAction: 'uniquify' })
       .then(async downloadId => {
-        try { await waitForDownload(downloadId, 30000); }
+        try {
+          const item = await waitForDownload(downloadId, 30000);
+          if (item.fileSize === 0) { sendResponse({ ok: false, error: 'The transcript download was empty.' }); return; }
+        }
         catch (error) { await cancelDownload(downloadId); throw error; }
         sendResponse({ ok: true, downloadId, filename: downloadFilename });
       })

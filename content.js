@@ -127,6 +127,10 @@ async function completeRecordingWorker(run, result) {
   }
 }
 
+function recordingSavedOccurrenceIds(results) {
+  return [...new Set((results || []).filter(result => result?.ok).map(result => typeof result.occurrenceId === 'string' ? result.occurrenceId.trim() : '').filter(Boolean))];
+}
+
 function showGuidedStatus(message, persistent = false, progress = null, stoppable = false, runId = null, stopping = false) {
   if (!guidedWorkspace) return;
   let bubble = document.getElementById('ztd-guided-status');
@@ -140,7 +144,7 @@ function showGuidedStatus(message, persistent = false, progress = null, stoppabl
   }
   bubble.querySelector('#ztd-guided-status-message').textContent = String(message || 'Working');
   const counts = bubble.querySelector('#ztd-guided-status-counts');
-  if (progress) { const saved = Number(progress.saved) || 0, unavailable = Number(progress.skipped) || 0, failed = Number(progress.failed) || 0, pending = Number.isFinite(progress.pending) ? progress.pending : '—'; counts.textContent = 'Saved ' + saved + ' · unavailable ' + unavailable + ' · failed ' + failed + ' · pending ' + pending; counts.hidden = false; } else { counts.hidden = true; }
+  if (progress) { const saved = Number(progress.saved) || 0, unavailable = Number(progress.skipped) || 0, duplicatesAvoided = Number(progress.duplicatesAvoided) || 0, failed = Number(progress.failed) || 0, pending = Number.isFinite(progress.pending) ? progress.pending : '—'; counts.textContent = 'Saved ' + saved + ' · unavailable ' + unavailable + ' · duplicates avoided ' + duplicatesAvoided + ' · failed ' + failed + ' · pending ' + pending; counts.hidden = false; } else { counts.hidden = true; }
   const stop = bubble.querySelector('#ztd-guided-stop'); if (runId && bubble.dataset.runId !== runId) { stop.disabled = false; stop.textContent = 'Stop download'; bubble.dataset.runId = runId; } stop.hidden = !stoppable; if (stopping) { stop.disabled = true; stop.textContent = 'Stopping…'; }
   bubble.hidden = false;
   if (guidedStatusTimer) clearTimeout(guidedStatusTimer);
@@ -787,9 +791,10 @@ function rowsMatchPlan(currentRows, plannedEntries) {
 function recordingProgressSnapshot(workerRun, results, skippedUnavailable) {
   const saved = results.filter(result => result?.ok).length;
   const failed = results.filter(result => result?.ok === false).length;
+  const savedOccurrenceIds = workerRun.settings?.avoidDuplicateMeetings === false ? [] : recordingSavedOccurrenceIds(results);
   const total = workerRun.total;
   const pending = Number.isFinite(total) ? Math.max(0, total - saved - skippedUnavailable - failed) : null;
-  return { saved, skipped: skippedUnavailable, failed, pending, total };
+  return { saved, skipped: skippedUnavailable, duplicatesAvoided: 0, failed, pending, total, savedOccurrenceIds };
 }
 
 async function collectDownloadPlan(settings, workerRun = sourceWorkerRun) {
@@ -936,7 +941,7 @@ async function saveTranscriptRow(item, plannedEntry) {
     }
     return { ok: false, error: saved?.error || 'Failed to save transcript file.', entry };
   }
-  return { ok: true, savedFilename: entry.savedFilename, targetFilename: plannedEntry.targetFilename };
+  return { ok: true, savedFilename: entry.savedFilename, targetFilename: plannedEntry.targetFilename, occurrenceId: capture.meetingId };
 }
 
 async function saveVisiblePage(settingsNow, workerRun = sourceWorkerRun) {
@@ -1269,7 +1274,7 @@ function renderPanel(rows, settings) {
         }
       } finally {
         const failed = results.filter(result => result && result.ok === false).length;
-        await completeRecordingWorker(workerRun, { saved: results.filter(result => result?.ok).length, skipped: skippedUnavailable, failed: failed + (workerError && !saveAllController.stopRequested ? 1 : 0), error: workerError, firstError: workerRun.firstError || null, needsUserAction: workerRun.downloadBlocked ? { url: location.href, reason: workerRun.firstError?.error, downloadAttention: true } : null, stopped: saveAllController.stopRequested });
+        await completeRecordingWorker(workerRun, { saved: results.filter(result => result?.ok).length, savedOccurrenceIds: workerRun.settings?.avoidDuplicateMeetings === false ? [] : recordingSavedOccurrenceIds(results), skipped: skippedUnavailable, failed: failed + (workerError && !saveAllController.stopRequested ? 1 : 0), error: workerError, firstError: workerRun.firstError || null, needsUserAction: workerRun.downloadBlocked ? { url: location.href, reason: workerRun.firstError?.error, downloadAttention: true } : null, stopped: saveAllController.stopRequested });
       }
 
       stickyPanelMessage = null;
@@ -1334,7 +1339,7 @@ function renderPanel(rows, settings) {
         showToast(`Current page finished. Saved ${downloadManifest.length} transcript${downloadManifest.length === 1 ? '' : 's'}.`, 'success', 5000);
       } finally {
         const failed = (result?.results || []).filter(item => item && item.ok === false).length;
-        await completeRecordingWorker(workerRun, { saved: (result?.results || []).filter(item => item?.ok).length, skipped: result?.skippedUnavailable || 0, failed: failed || (!result?.ok && !saveAllController.stopRequested ? 1 : 0), stopped: saveAllController.stopRequested });
+        await completeRecordingWorker(workerRun, { saved: (result?.results || []).filter(item => item?.ok).length, savedOccurrenceIds: workerRun.settings?.avoidDuplicateMeetings === false ? [] : recordingSavedOccurrenceIds(result?.results), skipped: result?.skippedUnavailable || 0, failed: failed || (!result?.ok && !saveAllController.stopRequested ? 1 : 0), stopped: saveAllController.stopRequested });
       }
     };
     panel.querySelector('#ztd-save-page').addEventListener('click', () => recordingWorkerActions.page());
