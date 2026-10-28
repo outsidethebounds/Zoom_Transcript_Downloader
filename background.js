@@ -350,7 +350,7 @@ async function sendToReadyContentScript(tabId, url, message) {
 
 function sanitizeFailureDiagnostic(value) {
   if (!value || typeof value !== 'object') return null;
-  const stages = new Set(['capability', 'occurrence-lookup', 'capture-ack', 'stale-check', 'transcript-response', 'file-save', 'row-save']);
+  const stages = new Set(['capability', 'occurrence-lookup', 'capture-ack', 'stale-check', 'transcript-response', 'file-save', 'row-save', 'worker']);
   const categories = new Set(['id-correlation', 'capture-bridge', 'response-timeout', 'file-save', 'other']);
   const error = String(value.error || '').replace(/https?:\/\/[^\s]+/g, '[redacted-url]').slice(0, 300);
   if (!error) return null;
@@ -506,6 +506,12 @@ async function stopSourceRun(originTabId) {
 }
 function normalizeSourceWorkerResult(run, source, result = {}) {
   const normalized = { ...result };
+  // Recording startup/planning failures can report a terminal error before a
+  // row-level firstError exists. Mark it as worker-level rather than guessing
+  // which stage failed; detailed row diagnostics always take precedence.
+  if (source === "recordings" && Number(normalized.failed) > 0 && !normalized.firstError && normalized.error) {
+    normalized.firstError = sanitizeFailureDiagnostic({ stage: "worker", category: "other", error: normalized.error });
+  }
   const total = Number(run?.totals?.[source]);
   if (Number.isFinite(total)) {
     const accounted = Math.max(0, Number(normalized.saved) || 0) + Math.max(0, Number(normalized.skipped) || 0) + Math.max(0, Number(normalized.failed) || 0);

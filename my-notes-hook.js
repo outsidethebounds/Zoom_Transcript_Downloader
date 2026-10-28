@@ -70,6 +70,7 @@
   let notesPaginationPages = 0;
   let notesPaginationRows = 0;
   let lastNotesPagination = null;
+  let notesPaginationEpoch = 0;
   const requestKeyNames = (url, body) => {
     const keys = [];
     try { for (const [key] of new URL(url, location.href).searchParams) keys.push(key); } catch {}
@@ -85,11 +86,34 @@
     try { const url = new URL(value, location.href); return /(?:^|\.)zoom\.us$/i.test(url.hostname) && url.pathname === NOTES_LIST_PATH; }
     catch { return false; }
   };
-  const publishNotesPage = (method, url, body, status, mime, payload) => {
+  const hasNonEmptyPageToken = (url, body) => {
+    const values = [];
+    try { values.push(...new URL(url, location.href).searchParams.getAll('pageToken')); } catch {}
+    if (typeof body === 'string') {
+      try {
+        const value = JSON.parse(body);
+        if (value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'pageToken')) values.push(value.pageToken);
+      } catch { try { values.push(...new URLSearchParams(body).getAll('pageToken')); } catch {} }
+    } else if (body instanceof URLSearchParams || body instanceof FormData) {
+      values.push(...body.getAll('pageToken'));
+    }
+    return values.some(value => typeof value === 'string' && value.trim().length > 0);
+  };
+  // Bind responses to the cursor chain active when each request starts.
+  // A late response from an older first-page request must not reset a newer scan.
+  // Missing or empty page tokens both identify a first-page request. Token values
+  // remain local and are never included in diagnostics or page messages.
+  const beginNotesPage = (url, body) => {
+    if (hasNonEmptyPageToken(url, body)) return notesPaginationEpoch;
+    notesPaginationPages = 0;
+    notesPaginationRows = 0;
+    return ++notesPaginationEpoch;
+  };
+  const publishNotesPage = (epoch, method, url, body, status, mime, payload) => {
+    if (epoch !== notesPaginationEpoch) return;
     const keys = requestKeyNames(url, body);
     const notesList = payload?.notesList;
     const hasSchema = payload && Array.isArray(notesList) && typeof payload.nextPageToken === 'string';
-    if (keys.includes('pageToken') === false) { notesPaginationPages = 0; notesPaginationRows = 0; }
     notesPaginationSequence += 1;
     notesPaginationPages += 1;
     const count = Array.isArray(notesList) ? notesList.length : null;
@@ -111,12 +135,13 @@
   XMLHttpRequest.prototype.send = function(body) {
     const request = this.__ztdNotesPageRequest;
     if (request && isNotesListUrl(request.url)) {
+      const epoch = beginNotesPage(request.url, body);
       this.addEventListener('load', () => {
         let payload = null;
         try { payload = this.responseType === 'json' ? this.response : JSON.parse(this.responseText); } catch {}
-        publishNotesPage(request.method, request.url, body, this.status, this.getResponseHeader('content-type') || '', payload);
+        publishNotesPage(epoch, request.method, request.url, body, this.status, this.getResponseHeader('content-type') || '', payload);
       }, { once: true });
-      this.addEventListener('error', () => publishNotesPage(request.method, request.url, body, 0, '', null), { once: true });
+      this.addEventListener('error', () => publishNotesPage(epoch, request.method, request.url, body, 0, '', null), { once: true });
     }
     return originalXhrSend.call(this, body);
   };
@@ -126,12 +151,13 @@
     if (!isNotesListUrl(url)) return originalFetch.apply(this, arguments);
     const method = String(init.method || input?.method || 'GET').toUpperCase();
     const body = init.body ?? null;
+    const epoch = beginNotesPage(url, body);
     return originalFetch.apply(this, arguments).then(async response => {
       let payload = null;
       try { payload = await response.clone().json(); } catch {}
-      publishNotesPage(method, url, body, response.status, response.headers.get('content-type') || '', payload);
+      publishNotesPage(epoch, method, url, body, response.status, response.headers.get('content-type') || '', payload);
       return response;
-    }, error => { publishNotesPage(method, url, body, 0, '', null); throw error; });
+    }, error => { publishNotesPage(epoch, method, url, body, 0, '', null); throw error; });
   };
   window.addEventListener('message', event => {
     const message = event.data;

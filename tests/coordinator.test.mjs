@@ -278,11 +278,42 @@ const tick=()=>new Promise(r=>setImmediate(r));
 }
 {
  const f=fixture();await f.run('recoveryReady');
- const run={runId:'safe-terminal',originTabId:1,originUrl:'https://zoom.us/recording/meeting/transcript',rootFolder:'Team/ZoomTranscripts-10162026',settings:{},totals:{},mode:'all',plan:createSourcePlan(['myNotes']),results:{myNotes:{saved:2,skipped:1,failed:0,pending:3,error:'private url must not persist',firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed https://files.example/private?token=private-marker'}}},currentSource:'myNotes',guided:true,finished:false,workerTabId:null};
+ f.ctx.payload={selected:['recordings'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{},guidedWorkspace:true};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
+ const runId=f.session['ztd:source-runs'][0].runId;
+ f.ctx.rid=runId;
+ await f.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",failed:1,error:"Recording planning failed https://files.example/private?token=secret#private-marker"})');
+ const content=fs.readFileSync(new URL('../content.js',import.meta.url),'utf8');
+ const start=content.indexOf('async function startRecordingWorker(run) {'),end=content.indexOf('\n\nconst {',start);assert.ok(start>=0&&end>start);
+ const completion=[];const context={executeRecordingWorker:async()=>{throw new Error('Recording rows were not ready before the startup deadline.')},saveAllController:{stopRequested:false},completeRecordingWorker:async(_run,result)=>completion.push(result)};
+ await vm.runInNewContext(content.slice(start,end)+'\nstartRecordingWorker',context)({runId:'startup'});
+ assert.deepEqual(JSON.parse(JSON.stringify(completion[0])),{saved:0,skipped:0,failed:1,stopped:false,error:'Recording rows were not ready before the startup deadline.'},'startup lifecycle emits terminal failure without row-level firstError');
+ const diagnostic=f.session['ztd:last-guided-terminal'].results.recordings.firstError;
+ assert.deepEqual(JSON.parse(JSON.stringify(diagnostic)),{stage:'worker',category:'other',error:'Recording planning failed [redacted-url]'});
+ assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('secret'),false);
+ assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private-marker'),false);
+ assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('transcript body'),false);
+ const noFailure=f.run('normalizeSourceWorkerResult({totals:{}},"recordings",{failed:0,error:"not a failure"})');assert.equal(noFailure.firstError,undefined);
+ const noError=f.run('normalizeSourceWorkerResult({totals:{}},"recordings",{failed:1})');assert.equal(noError.firstError,undefined);
+ const notes=f.run('normalizeSourceWorkerResult({totals:{}},"myNotes",{failed:1,error:"Notes issue"})');assert.equal(notes.firstError,undefined);
+ const runLevel=fixture();await runLevel.run('recoveryReady');runLevel.ctx.payload=f.ctx.payload;
+ await runLevel.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');const runLevelId=runLevel.session['ztd:source-runs'][0].runId;runLevel.ctx.rid=runLevelId;
+ runLevel.run('sourceRunByWorkerTab.get(10).firstError='+JSON.stringify({stage:'capture-ack',category:'capture-bridge',error:'run-level detail'}));
+ await runLevel.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",failed:1,error:"generic worker error"})');
+ assert.deepEqual(JSON.parse(JSON.stringify(runLevel.session['ztd:last-guided-terminal'].results.recordings.firstError)),{stage:'capture-ack',category:'capture-bridge',error:'run-level detail'},'existing run.firstError takes precedence over fallback');
+ const rowError={stage:'capture-ack',category:'capture-bridge',error:'specific row detail'};
+ const rowResult=f.run('normalizeSourceWorkerResult({totals:{}},"recordings",{failed:1,error:"generic worker error",firstError:'+JSON.stringify(rowError)+'})');
+ assert.deepEqual(JSON.parse(JSON.stringify(rowResult.firstError)),rowError,'a detailed row firstError takes precedence over the fallback');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ const run={runId:'safe-terminal',originTabId:1,originUrl:'https://zoom.us/recording/meeting/transcript',rootFolder:'Team/ZoomTranscripts-10162026',settings:{},totals:{},mode:'all',plan:createSourcePlan(['myNotes']),results:{myNotes:{saved:2,skipped:1,failed:0,pending:3,transcriptBody:'irrelevant transcript body',content:'irrelevant content',error:'private url must not persist',firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed https://files.example/private?token=private-marker'}}},currentSource:'myNotes',guided:true,finished:false,workerTabId:null};
  f.ctx.terminalRun=run;await f.run('finishSourceRun(terminalRun)');
  assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:last-guided-terminal'].results.myNotes)),{saved:2,skipped:1,failed:0,pending:3,error:true,firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed [redacted-url]'}});
  assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private url'),false,'terminal journal omits raw worker error detail');
  assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private-marker'),false,'terminal diagnostics redact URL query data');
+ assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('irrelevant transcript body'),false,'terminal omits supplied body text');
+ assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('irrelevant content'),false,'terminal omits supplied content text');
  let response;const handler=f.chrome.runtime.onMessage.listeners[0];
  await new Promise(resolve=>handler({type:'zoomTranscriptExtension:getGuidedRunState'},{tab:{id:900}},value=>{response=value;resolve()}));
  assert.equal(response.terminal.runId,'safe-terminal','missed terminal outcomes replay on workspace hydration');

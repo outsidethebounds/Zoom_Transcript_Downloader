@@ -93,7 +93,15 @@
   function readRows() {
     return [...document.querySelectorAll(LIST_SELECTOR)].map((row, index) => {
       const label = row.getAttribute('aria-label') || '';
-      const meta = sourcesApi.parseNoteListLabel(label) || (label.trim() ? { title: label.trim(), dateISO: 'unknown-date', timeHHMM: 'unknown-time' } : null);
+      const labelMeta = sourcesApi.parseNoteListLabel(label);
+      // The third cell is Zoom's Date created column. Read only that cell so
+      // an exact title or relative Last modified label can never masquerade
+      // as the note's creation date.
+      const dateCell = row.querySelectorAll?.('[role="cell"]')?.[2];
+      const exactTimestamp = sourcesApi.parseNoteListTimestamp(dateCell?.innerText || dateCell?.textContent || '');
+      const meta = labelMeta || (label.trim()
+        ? { title: label.trim(), dateISO: exactTimestamp?.dateISO || 'unknown-date', timeHHMM: exactTimestamp?.timeHHMM || 'unknown-time' }
+        : null);
       return meta ? { ...meta, id: row.getAttribute('data-ztd-note-id') || '', occurrenceId: row.getAttribute('data-ztd-occurrence-id') || '', label, index, row } : null;
     }).filter(Boolean);
   }
@@ -110,20 +118,68 @@
     const root = scrollRoot();
     if (!allPages) return readRows().map(note => ({ ...note, row: undefined }));
     root.scrollTop = 0;
-    await sleep(250);
     let state = await requestNotesPaginationState();
     const byKey = new Map();
     const collectVisible = () => readRows().forEach(note => { const key = note.id || note.label; if (key) byKey.set(key, { ...note, row: undefined }); });
+    const waitForCollectedCount = expectedCount => {
+      collectVisible();
+      if (byKey.size >= expectedCount) return Promise.resolve(byKey.size === expectedCount);
+      return new Promise(resolve => {
+        let timer;
+        let observer;
+        let settled = false;
+        const finish = matched => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          observer?.disconnect();
+          resolve(matched);
+        };
+        observer = new MutationObserver(() => {
+          collectVisible();
+          if (byKey.size >= expectedCount) finish(byKey.size === expectedCount);
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+        timer = setTimeout(() => { collectVisible(); finish(byKey.size === expectedCount); }, 5000);
+        collectVisible();
+        if (byKey.size >= expectedCount) finish(byKey.size === expectedCount);
+      });
+    };
+    const waitForDomChange = timeoutMs => new Promise(resolve => {
+      let settled = false;
+      let timer;
+      const observer = new MutationObserver(() => finish(true));
+      const finish = changed => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timer);
+        resolve(changed);
+      };
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      timer = setTimeout(() => finish(false), timeoutMs);
+    });
     const fail = message => { const error = new Error(message); error.partialNotes = [...byKey.values()]; throw error; };
     if (!state?.valid || state.method !== 'GET' || state.path !== '/api/file/meeting_notes/my_notes' || state.status !== 200 || !Array.isArray(state.requestKeys) || !state.requestKeys.includes('pageSize') || !Number.isFinite(state.totalRows)) fail('The authenticated My Notes API pagination state is unavailable; scan is incomplete.');
     notesPaginationState = state;
     lastCollectedNotes = [];
+    // Zoom can render the complete list before this content script starts. If
+    // the API has already confirmed its terminal cursor, reconcile those rows
+    // immediately instead of forcing scroll/timer cycles in a throttled tab.
+    collectVisible();
+    if (state.nextPageTokenPresent === false && byKey.size === state.totalRows) {
+      lastCollectedNotes = [...byKey.values()];
+      return lastCollectedNotes;
+    }
     for (let steps = 0; steps < 10000; steps++) {
       if (stopRequested || guidedNotesScanStopped) fail('Scan stopped before the My Notes cursor reached its terminal page.');
       collectVisible();
       const atBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 2;
       if (atBottom && state.nextPageTokenPresent === false) {
-        if (byKey.size !== state.totalRows) fail('My Notes terminal page count did not match the unique metadata rows collected.');
+        // The MAIN-world hook observes the API response before Zoom's React list
+        // necessarily commits the corresponding rows. Let that DOM update settle
+        // before declaring the terminal inventory count inconsistent.
+        if (byKey.size !== state.totalRows && !(await waitForCollectedCount(state.totalRows))) fail('My Notes terminal page count did not match the unique metadata rows collected.');
         lastCollectedNotes = [...byKey.values()];
         return lastCollectedNotes;
       }
@@ -140,7 +196,10 @@
       const oldTop = root.scrollTop;
       root.scrollTop = Math.min(root.scrollHeight, root.scrollTop + Math.max(250, Math.floor(root.clientHeight * .7)));
       root.dispatchEvent(new Event('scroll', { bubbles: true }));
-      await sleep(250);
+      // Mutation notification is the normal path; keep the no-mutation fallback
+      // short so virtualized/pre-rendered rows do not pay seconds per scroll.
+      if (root.scrollTop !== oldTop) await waitForDomChange(750);
+      collectVisible();
       if (root.scrollTop === oldTop && !(root.scrollTop + root.clientHeight >= root.scrollHeight - 2)) fail('My Notes list stopped before its API terminal signal.');
     }
     fail('My Notes exceeded the safe page/scroll limit before terminal confirmation.');

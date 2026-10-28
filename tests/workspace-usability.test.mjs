@@ -110,7 +110,7 @@ test('results show the exact saved destination and warn before whole-source retr
 });
 
 test('guided terminal keeps the browser download attention reason visible', () => {
-  const elements = { stop: { hidden: false }, 'job-stop': { disabled: false, textContent: '' }, review: { hidden: false } };
+  const elements = { stop: { hidden: false }, 'job-stop': { disabled: false, textContent: '' }, 'job-stall-warning': { hidden: true }, review: { hidden: false } };
   let message = '';
   const fn = vm.runInNewContext(extract('function renderGuidedTerminal(', 'function reconcileGuidedRunState(', 'renderGuidedTerminal'), {
     $: id => elements[id], hideJob() {}, stopPending: false, lastRunSavedSources: [], inventory: null,

@@ -37,11 +37,26 @@ test('settings persistence is explicit, survives re-open, and never starts a sca
 });
 
 test('settings stay available on Review and lock during scans and exports',()=>{
- assert.match(workspace,/\$\('download-settings'\)\.hidden=!\(s==='connect'\|\|s==='review'\)/);assert.match(workspace,/\$\('download-settings'\)\.open=s==='review'/);
+ assert.match(workspace,/\$\('download-settings'\)\.hidden=!\(s==='connect'\|\|s==='review'\)/);assert.doesNotMatch(workspace,/\$\('download-settings'\)\.open=s==='review'/);
  assert.ok(workspace.includes('fields.disabled=scanBusy||activeRun'));
  assert.match(workspace,/finally\{stopPending=false;scanBusy=false;[^}]*updateDownloadSettingsLock()/);
  assert.match(workspace,/setStage\(recoveredWithoutInventory\?'connect':hasError\?'review':'save'\)/);
  const start=workspace.indexOf('function updateDownloadSettingsLock()');const end=workspace.indexOf('function renderDownloadSettings()',start);const disabled={};const fn=vm.runInNewContext(workspace.slice(start,end)+'\nupdateDownloadSettingsLock',{$:id=>disabled[id]|| (disabled[id]={}),scanBusy:true,activeRun:false,settingsAreDirty:()=>false,settingsReady:true,stage:'connect',$:id=>id==='settings-status'?{textContent:'Saved settings.',dataset:{}}:(disabled[id]||(disabled[id]={removeAttribute(){}}))});fn();assert.equal(disabled['download-settings-fields'].disabled,true);
+});
+
+test('source and download panes start collapsed and stay user-controlled within each stage',()=>{
+ const html=read('workspace.html');
+ assert.match(html,/<details id="transcript-sources" class="transcript-sources"><summary>Transcript sources<\/summary>/);
+ assert.match(html,/<details id="download-settings" class="download-settings"><summary>Download settings<\/summary>/);
+ assert.doesNotMatch(html,/<details id="(?:transcript-sources|download-settings)"[^>]*\sopen(?:[=\s>])/);
+ const controls={};
+ for(const id of ['step1','step2','step3'])controls[id]={classList:{toggle(){}},firstChild:{textContent:''},setAttribute(){},removeAttribute(){}};
+ for(const id of ['transcript-sources','download-settings','review','setup-controls','company-controls','primary','phase','title','intro'])controls[id]={open:true,hidden:false,textContent:''};
+ const start=workspace.indexOf('const setStage=s=>');const end=workspace.indexOf('function normalizeDownloadSettings',start);
+ const setStage=vm.runInNewContext(workspace.slice(start,end)+'\nsetStage',{$:id=>controls[id],stage:'connect',updateDownloadSettingsLock(){}});
+ setStage('review');assert.equal(controls['transcript-sources'].open,false);assert.equal(controls['download-settings'].open,false,'Review does not auto-expand download settings');
+ controls['transcript-sources'].open=true;controls['download-settings'].open=true;setStage('review');assert.equal(controls['transcript-sources'].open,true,'same-stage refresh preserves explicit source-pane choice');assert.equal(controls['download-settings'].open,true,'same-stage refresh preserves explicit settings-pane choice');
+ setStage('save');assert.equal(controls['transcript-sources'].open,false);assert.equal(controls['download-settings'].open,false);
 });
 
 test('shared path rules preserve sanitized relative folders and source-specific directories',()=>{

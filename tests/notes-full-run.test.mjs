@@ -123,6 +123,9 @@ assert.equal(stopped.result.saved, 1); assert.equal(stopped.result.stopped, true
 const page = await run({ scope: { notes: [{ id: 'opaque-30', label: 'Undated note 30', title: 'Undated note 30', dateISO: 'unknown-date' }] } });
 assert.equal(page.result.saved, 1, 'unknown permission schema is not default-denied when UI permits export');
 assert.equal(page.result.discovered, 1, 'current-page scope is preserved');
+const scopedDate = await run({ scope: { notes: [{ id: 'opaque-30', label: 'Recent note', title: 'Recent note', dateISO: '2026-10-27', timeHHMM: '1642' }] } });
+assert.equal(scopedDate.result.discovered, 1, 'date metadata remains attached to the scoped row');
+assert.ok(scopedDate.messages.some(m => m.type.endsWith(':expectMyNotesExport') && m.payload.filename === '2026-10-27 - 1642 - Recent note.txt'), 'scoped exact date and time reach the generated filename');
 // An inactive worker must become ready from DOM changes even if Chrome freezes timers.
 full.context.setTimeout = () => 1;
 let ready = false;

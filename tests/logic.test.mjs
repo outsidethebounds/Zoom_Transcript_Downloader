@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import core from '../lib/core.js';
+import page from '../lib/page.js';
 
 const {
   sanitizeTitle,
@@ -52,6 +53,33 @@ function run() {
     meetingId: '12345678901',
     dateText: 'Apr 4, 2026 9:30 AM',
   });
+
+  const liveRowText = 'Fixture meeting 123 4567 8901 attendee@example.com Oct 21, 2026 9:17 AM 1 day';
+  assert.deepEqual(parseRowText(liveRowText), {
+    title: 'Fixture meeting',
+    meetingId: '12345678901',
+    dateText: 'Oct 21, 2026 9:17 AM',
+  }, 'row text remains parseable when action controls are aria-label-only');
+  assert.equal(parseRowText('Fixture meeting Oct 21, 2026 9:17 AM'), null, 'date and age remain required');
+
+  const downloadButton = { disabled: false, className: '', getAttribute: () => null };
+  const liveRow = {
+    innerText: liveRowText,
+    getAttribute: name => name === 'data-key' ? 'fixture-occurrence' : null,
+    querySelector: selector => selector === 'button[aria-label^="Download "]' ? downloadButton : null,
+  };
+  const scanRows = () => page.scanRows({
+    rowSelector: 'tr.zoom-virtual-table__row',
+    downloadButtonSelector: 'button[aria-label^="Download "]',
+    parseRowText,
+    root: { querySelectorAll: () => [liveRow] },
+  });
+  assert.equal(scanRows()[0]?.hasDownload, true, 'an enabled aria-labeled button keeps the row eligible');
+  downloadButton.disabled = true;
+  assert.equal(scanRows()[0]?.hasDownload, false, 'the enabled-download guard still excludes disabled actions');
+  downloadButton.disabled = false;
+  liveRow.querySelector = () => null;
+  assert.equal(scanRows()[0]?.hasDownload, false, 'rows without a download button remain ineligible');
 
   const parsedSingular = parseRowText('Last Page Meeting 123 4567 8901 foo@bar.com Apr 18, 2026 7:01 AM 1 day Download Delete');
   assert.deepEqual(parsedSingular, {
