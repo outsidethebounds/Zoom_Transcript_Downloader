@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860" role="img" aria-labelledby="title desc">
-  <title id="title">Manual installation overview</title>
-  <desc id="desc">Illustration of Chrome or Edge extensions page with Developer mode and Load unpacked highlighted.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="950" viewBox="0 0 1400 950" role="img" aria-labelledby="title desc">
+  <title id="title">Historical: Manual installation overview</title>
+  <desc id="desc">Historical legacy illustration, not current workflow guidance. Illustration of Chrome or Edge extensions page with Developer mode and Load unpacked highlighted.</desc>
   <rect width="1400" height="860" fill="#eef3fb"/>
   <rect x="56" y="48" width="1288" height="764" rx="28" fill="#ffffff" stroke="#cfd9ea" stroke-width="3"/>
   <rect x="56" y="48" width="1288" height="64" rx="28" fill="#19324d"/>
@@ -34,4 +34,7 @@
   <rect x="70" y="710" width="1260" height="92" rx="24" fill="#fff7e8" stroke="#f0c36d" stroke-width="3"/>
   <text x="104" y="754" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#7b4b00">Manual install flow:</text>
   <text x="370" y="754" font-family="Arial, sans-serif" font-size="28" fill="#7b4b00">Extract the package, open Extensions, turn on Developer mode, click Load unpacked, then choose the folder containing manifest.json.</text>
+  <rect x="56" y="870" width="1288" height="68" rx="10" fill="#fff7e8" stroke="#d6a64b"/>
+  <text x="76" y="896" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#694400">Historical illustration - older UI, not current guidance.</text>
+  <text x="76" y="922" font-family="Arial, sans-serif" font-size="20" fill="#694400">Use the 2026.11 Quick Start and User Guide for current steps.</text>
 </svg>

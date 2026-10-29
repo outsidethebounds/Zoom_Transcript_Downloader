@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="920" viewBox="0 0 1200 920" role="img" aria-labelledby="title desc">
-  <title id="title">Main panel overview</title>
-  <desc id="desc">Illustration of the Zoom Transcript Downloader panel highlighting Save all, Save page, status, destination, and footer utility controls.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1010" viewBox="0 0 1200 1010" role="img" aria-labelledby="title desc">
+  <title id="title">Historical: Main panel overview</title>
+  <desc id="desc">Historical legacy illustration, not current workflow guidance. Illustration of the Zoom Transcript Downloader panel highlighting Save all, Save page, status, destination, and footer utility controls.</desc>
   <rect width="1200" height="920" fill="#eef2f7"/>
   <rect x="250" y="84" width="700" height="660" rx="28" fill="#111827" stroke="#374151" stroke-width="4"/>
   <text x="292" y="138" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#f9fafb">Zoom Transcript Downloader</text>
@@ -55,4 +55,7 @@
   <text x="124" y="338" font-family="Arial, sans-serif" font-size="22" fill="#1c2c42">files will go</text>
   <path d="M232 320 L282 320" stroke="#1f6fff" stroke-width="5" fill="none" stroke-linecap="round"/>
   <polygon points="296,320 270,308 270,332" fill="#1f6fff"/>
+  <rect x="56" y="930" width="1088" height="68" rx="10" fill="#fff7e8" stroke="#d6a64b"/>
+  <text x="76" y="956" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#694400">Historical illustration - older UI, not current guidance.</text>
+  <text x="76" y="982" font-family="Arial, sans-serif" font-size="20" fill="#694400">Use the 2026.11 Quick Start and User Guide for current steps.</text>
 </svg>

@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="940" viewBox="0 0 1260 940" role="img" aria-labelledby="title desc">
-  <title id="title">Settings overview</title>
-  <desc id="desc">Illustration of the Settings dialog highlighting filename pattern, previews, Downloads subfolder, and the Meeting ID option.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="1030" viewBox="0 0 1260 1030" role="img" aria-labelledby="title desc">
+  <title id="title">Historical: Settings overview</title>
+  <desc id="desc">Historical legacy illustration, not current workflow guidance. Illustration of the Settings dialog highlighting filename pattern, previews, Downloads subfolder, and the Meeting ID option.</desc>
   <rect width="1260" height="940" fill="#e8edf5"/>
   <rect x="150" y="74" width="960" height="760" rx="28" fill="#111827" stroke="#374151" stroke-width="4"/>
   <text x="200" y="134" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#f9fafb">Settings</text>
@@ -44,4 +44,7 @@
   <text x="1126" y="754" font-family="Arial, sans-serif" font-size="22" fill="#1c2c42">is optional</text>
   <path d="M1104 730 L956 714" stroke="#1f6fff" stroke-width="5" fill="none" stroke-linecap="round"/>
   <polygon points="940,712 968,702 966,728" fill="#1f6fff"/>
+  <rect x="56" y="950" width="1148" height="68" rx="10" fill="#fff7e8" stroke="#d6a64b"/>
+  <text x="76" y="976" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#694400">Historical illustration - older UI, not current guidance.</text>
+  <text x="76" y="1002" font-family="Arial, sans-serif" font-size="20" fill="#694400">Use the 2026.11 Quick Start and User Guide for current steps.</text>
 </svg>
