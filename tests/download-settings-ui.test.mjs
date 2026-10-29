@@ -7,7 +7,7 @@ const read = name => fs.readFileSync(new URL('../' + name, import.meta.url), 'ut
 const workspace = read('workspace.js');
 
 function makePreviewHarness(pattern, folder, includeMeetingId) {
-  const elements = Object.fromEntries(['settings-pattern','settings-folder','settings-meeting-id','recording-preview','notes-preview','recording-destination','notes-destination'].map(id => [id, {value:'',checked:false,textContent:''}]));
+  const elements = Object.fromEntries(['settings-pattern','settings-folder','settings-meeting-id','settings-avoid-duplicates','recording-preview','notes-preview','recording-destination','notes-destination'].map(id => [id, {value:'',checked:false,textContent:''}]));
   elements['settings-pattern'].value=pattern; elements['settings-folder'].value=folder; elements['settings-meeting-id'].checked=includeMeetingId;
   const coreContext={}; vm.runInNewContext(read('lib/core.js'),coreContext);
   const sourcesContext={}; vm.runInNewContext(read('lib/sources.js'),sourcesContext);
@@ -25,15 +25,15 @@ test('Connect previews use production filename rules for both sources and real D
 });
 
 test('settings persistence is explicit, survives re-open, and never starts a scan/export',async()=>{
- const persisted={}; const controls={'settings-pattern':{value:'{date} - {title}'},'settings-folder':{value:'Team/Zoom'},'settings-meeting-id':{checked:true},'settings-status':{textContent:''}};let calls=0;
+ const persisted={}; const controls={'settings-pattern':{value:'{date} - {title}'},'settings-folder':{value:'Team/Zoom'},'settings-meeting-id':{checked:true},'settings-avoid-duplicates':{checked:false},'settings-status':{textContent:''}};let calls=0;
  const start=workspace.indexOf('async function saveDownloadSettings()');const end=workspace.indexOf('function status(',start);
- const context={$:id=>controls[id],scanBusy:false,activeRun:false,NS:'zoomTranscriptExtension',sanitizeDownloadSubfolder,chrome:{runtime:{sendMessage:async msg=>{calls++;assert.equal(msg.type,'zoomTranscriptExtension:setSettings');Object.assign(persisted,msg.settings);return {ok:true}}}},settings:{},applyDownloadSettings:()=>{},currentDownloadSettings:()=>({filenamePattern:controls['settings-pattern'].value,downloadSubfolder:controls['settings-folder'].value,includeMeetingId:controls['settings-meeting-id'].checked}),renderDownloadSettings(){}};
+ const context={$:id=>controls[id],scanBusy:false,activeRun:false,NS:'zoomTranscriptExtension',sanitizeDownloadSubfolder,chrome:{runtime:{sendMessage:async msg=>{calls++;assert.equal(msg.type,'zoomTranscriptExtension:setSettings');Object.assign(persisted,msg.settings);return {ok:true}}}},settings:{},applyDownloadSettings:()=>{},currentDownloadSettings:()=>({filenamePattern:controls['settings-pattern'].value,downloadSubfolder:controls['settings-folder'].value,includeMeetingId:controls['settings-meeting-id'].checked,avoidDuplicateMeetings:controls['settings-avoid-duplicates'].checked}),renderDownloadSettings(){}};
  const save=vm.runInNewContext(workspace.slice(start,end)+'\nsaveDownloadSettings',context);await save();
- assert.deepEqual(JSON.parse(JSON.stringify(persisted)),{filenamePattern:'{date} - {title}',downloadSubfolder:'Team/Zoom',includeMeetingId:true});assert.match(controls['settings-status'].textContent,/next export/);assert.equal(calls,1);
+ assert.deepEqual(JSON.parse(JSON.stringify(persisted)),{filenamePattern:'{date} - {title}',downloadSubfolder:'Team/Zoom',includeMeetingId:true,avoidDuplicateMeetings:false});assert.match(controls['settings-status'].textContent,/next export/);assert.equal(calls,1);
  // Re-open hydration reads precisely these persisted keys/defaults and repopulates controls.
  assert.match(workspace,/async function hydrate\(\)\{settings=await chrome\.storage\.local\.get\(\{companySubdomain:/,'workspace hydrates saved preference keys');
- assert.match(workspace,/function hydrate\(\).*?applyDownloadSettings\(settings\)/s);assert.ok(workspace.includes("$('settings-pattern').value=normalized.filenamePattern"));assert.ok(workspace.includes("$('settings-folder').value=normalized.downloadSubfolder"));assert.ok(workspace.includes("$('settings-meeting-id').checked=normalized.includeMeetingId"));
- assert.doesNotMatch(workspace.slice(start,end),/startGuidedDownload|runScans|downloads\.download/);
+ assert.match(workspace,/function hydrate\(\).*?applyDownloadSettings\(settings\)/s);assert.ok(workspace.includes("$('settings-pattern').value=normalized.filenamePattern"));assert.ok(workspace.includes("$('settings-folder').value=normalized.downloadSubfolder"));assert.ok(workspace.includes("$('settings-meeting-id').checked=normalized.includeMeetingId"));assert.ok(workspace.includes("$('settings-avoid-duplicates').checked=normalized.avoidDuplicateMeetings"));
+ assert.match(workspace,/avoidDuplicateMeetings:true/);assert.match(workspace,/avoidDuplicateMeetings:value\?\.avoidDuplicateMeetings!==false/);assert.match(workspace,/function sameDownloadSettings\(a,b\).*avoidDuplicateMeetings/s);assert.doesNotMatch(workspace.slice(start,end),/startGuidedDownload|runScans|downloads\.download/);
 });
 
 test('settings stay available on Review and lock during scans and exports',()=>{

@@ -344,13 +344,26 @@
   }
   function notesPending(config, result) {
     const total = Number.isFinite(config.total) ? config.total : result.discovered;
-    return Math.max(0, total - result.saved - result.skipped - result.failed);
+    return Math.max(0, total - (Number(result.saved) || 0) - (Number(result.skipped) || 0) - (Number(result.duplicatesAvoided) || 0) - (Number(result.failed) || 0));
+  }
+  function filterNotesForSavedRecordings(notes, savedOccurrenceIds, enabled = true) {
+    if (enabled === false) return { notes: [...notes], duplicatesAvoided: 0 };
+    const saved = new Set((Array.isArray(savedOccurrenceIds) ? savedOccurrenceIds : []).map(id => typeof id === 'string' ? id.trim() : '').filter(Boolean));
+    if (!saved.size) return { notes: [...notes], duplicatesAvoided: 0 };
+    const retained = [];
+    let duplicatesAvoided = 0;
+    for (const note of notes) {
+      const id = typeof note?.occurrenceId === 'string' ? note.occurrenceId.trim() : '';
+      if (id && saved.has(id)) duplicatesAvoided += 1;
+      else retained.push(note);
+    }
+    return { notes: retained, duplicatesAvoided };
   }
   async function processNotes(config) {
     stopRequested = config.stopRequested === true;
     activeWorker = true;
     activeWorkerRunId = config.runId || null;
-    const result = { runId: config.runId, source: 'myNotes', saved: 0, skipped: 0, failed: 0, stopped: false, needsUserAction: null, processed: 0, discovered: 0, eligible: 0, directSaved: 0, fallbackSaved: 0, pending: 0, skipReasons: {} };
+    const result = { runId: config.runId, source: 'myNotes', saved: 0, skipped: 0, duplicatesAvoided: 0, failed: 0, stopped: false, needsUserAction: null, processed: 0, discovered: 0, eligible: 0, directSaved: 0, fallbackSaved: 0, pending: 0, skipReasons: {} };
     let entries = [];
     const visited = new Set();
     try {
@@ -364,13 +377,15 @@
       const discoveredRows = config.scope?.notes || (config.scope?.labels ? config.scope.labels.map(label => ({ ...sourcesApi.parseNoteListLabel(label), label })) : await collectNotes(allPages));
       const rows = config.testLimit ? discoveredRows.slice(0, config.testLimit) : discoveredRows;
       result.discovered = rows.length;
+      const dedupeEnabled = config.avoidDuplicateMeetings !== false && config.settings?.avoidDuplicateMeetings !== false;
+      const retainedRows = filterNotesForSavedRecordings(rows, config.savedRecordingOccurrenceIds, dedupeEnabled);
+      result.duplicatesAvoided = retainedRows.duplicatesAvoided;
       await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: notesPending(config, result) }, message: 'Discovered ' + rows.length + ' notes; checking transcript access.' });
       // Plan filenames from every discovered item, before access filtering.
       // Unknown permission metadata is not a denial; export/UI decides access.
       const planned = new Map();
-      for (const row of rows) { const key = row.id || row.label; if (!planned.has(key)) planned.set(key, row); }
+      for (const row of retainedRows.notes) { const key = row.id || row.label; if (!planned.has(key)) planned.set(key, row); }
       entries = sourcesApi.collisionSafeNoteFilenames([...planned.values()], { filenamePattern: config.settings?.filenamePattern });
-      result.discovered = entries.length;
       let directAvailable = true;
       let root = scrollRoot();
       for (const entry of entries) {
@@ -388,7 +403,7 @@
             if (direct.kind === 'saved') { result.saved += 1; result.directSaved += 1; result.eligible += 1; }
             else if (direct.kind === 'inaccessible') { result.skipped += 1; const reason = 'Export denied or transcript unavailable (HTTP ' + direct.status + ').'; result.skipReasons[reason] = (result.skipReasons[reason] || 0) + 1; }
             else { result.failed += 1; result.error = direct.error || (direct.kind === 'rateLimit' ? 'Zoom rate limit reached; stopped after bounded Retry-After retries. Retry My Notes only later.' : 'Authenticated My Notes export failed; stopped to avoid duplicate or misattributed downloads. Retry My Notes only.'); result.firstError = { stage: 'file-save', category: 'file-save', error: result.error }; if (direct.needsUserAction) result.needsUserAction = { url: location.origin + location.pathname, reason: result.error, downloadAttention: true }; break; }
-            await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: notesPending(config, result) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
+            await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: notesPending(config, result) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', duplicates avoided ' + result.duplicatesAvoided + ', failed ' + result.failed + '.' });
             continue;
           }
         }
@@ -440,7 +455,7 @@
         if (finished.ok) { result.saved += 1; result.fallbackSaved += 1; }
         else if (finished.timedOut && isLoginBlocker()) result.needsUserAction = { url: location.origin + location.pathname, reason: 'My Notes export is blocked by a sign-in or permission prompt.' };
         else { result.failed += 1; result.error = finished.error || 'My Notes download was interrupted.'; if (finished.timedOut) { result.error = 'The browser download did not respond in time. Check for an outstanding browser save dialog or Downloads item, close or cancel it if needed, then retry this source.'; await say('cancelMyNotesExport', { exportId }); result.firstError = { stage: 'file-save', category: 'file-save', error: result.error }; result.needsUserAction = { url: location.origin + location.pathname, reason: result.error, downloadAttention: true }; break; } }
-        await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: Math.max(0, result.discovered - result.saved - result.skipped - result.failed) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', failed ' + result.failed + '.' });
+        await say('sourceWorkerProgress', { runId: config.runId, progress: { ...result, pending: notesPending(config, result) }, message: 'Saved ' + result.saved + ', skipped ' + result.skipped + ', duplicates avoided ' + result.duplicatesAvoided + ', failed ' + result.failed + '.' });
         history.back();
         if (!await waitForList()) {
           if (isLoginBlocker()) { result.needsUserAction = { url: location.origin + location.pathname, reason: 'Sign in to Zoom in this My Notes worker tab, then retry My Notes only.' }; break; }
@@ -453,7 +468,7 @@
       result.error = String(error);
     } finally {
       if (pendingExportId) { await say('clearMyNotesExport', { exportId: pendingExportId }).catch(() => {}); pendingExportId = null; }
-      result.pending = Math.max(0, result.discovered - result.saved - result.skipped - result.failed);
+      result.pending = notesPending(config, result);
       result.stopped = result.stopped || stopRequested;
       if (config.worker) await say('sourceWorkerCompleted', result);
       activeWorker = false;

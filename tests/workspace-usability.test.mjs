@@ -28,6 +28,7 @@ test('saved settings become dirty immediately and block the primary action until
     'settings-pattern': { value: '{date} - {title}' },
     'settings-folder': { value: 'Work' },
     'settings-meeting-id': { checked: false },
+    'settings-avoid-duplicates': { checked: true },
     'download-settings-fields': {},
     'settings-save': {},
     'settings-discard': { disabled: true },
@@ -37,7 +38,7 @@ test('saved settings become dirty immediately and block the primary action until
   const context = {
     $: id => controls[id], sanitizeDownloadSubfolder,
     stage: 'connect', scanBusy: false, activeRun: false, inventory: null, settingsReady: true,
-    savedDownloadSettings: { filenamePattern: '{date} - {title}', downloadSubfolder: '', includeMeetingId: false },
+    savedDownloadSettings: { filenamePattern: '{date} - {title}', downloadSubfolder: '', includeMeetingId: false, avoidDuplicateMeetings: true },
     selected: () => [],
   };
   const code = extract('function normalizeDownloadSettings', 'function renderDownloadSettings()', '({settingsAreDirty, updateDownloadSettingsLock});');
@@ -50,10 +51,15 @@ test('saved settings become dirty immediately and block the primary action until
   assert.equal(helpers.settingsAreDirty(), false);
   helpers.updateDownloadSettingsLock();
   assert.equal(controls.primary.disabled, false);
+  controls['settings-avoid-duplicates'].checked = false;
+  assert.equal(helpers.settingsAreDirty(), true, 'changing duplicate avoidance is a saved setting');
+  helpers.updateDownloadSettingsLock();
+  assert.equal(controls.primary.disabled, true);
   controls['settings-folder'].value = 'Draft';
-  const discard = vm.runInNewContext(workspace.slice(workspace.indexOf('function discardDownloadSettings()'), workspace.indexOf('async function saveDownloadSettings()')) + '\ndiscardDownloadSettings', { scanBusy: false, activeRun: false, savedDownloadSettings: { filenamePattern: '{date} - {title}', downloadSubfolder: '', includeMeetingId: false }, $: id => controls[id], applyDownloadSettings: saved => { controls['settings-pattern'].value = saved.filenamePattern; controls['settings-folder'].value = saved.downloadSubfolder; controls['settings-meeting-id'].checked = saved.includeMeetingId; }, updateDownloadSettingsLock() {} });
+  const discard = vm.runInNewContext(workspace.slice(workspace.indexOf('function discardDownloadSettings()'), workspace.indexOf('async function saveDownloadSettings()')) + '\ndiscardDownloadSettings', { scanBusy: false, activeRun: false, savedDownloadSettings: { filenamePattern: '{date} - {title}', downloadSubfolder: '', includeMeetingId: false, avoidDuplicateMeetings: true }, $: id => controls[id], applyDownloadSettings: saved => { controls['settings-pattern'].value = saved.filenamePattern; controls['settings-folder'].value = saved.downloadSubfolder; controls['settings-meeting-id'].checked = saved.includeMeetingId; controls['settings-avoid-duplicates'].checked = saved.avoidDuplicateMeetings; }, updateDownloadSettingsLock() {} });
   discard();
   assert.equal(controls['settings-folder'].value, '');
+  assert.equal(controls['settings-avoid-duplicates'].checked, true, 'Discard restores the saved duplicate preference');
 });
 
 test('zero selection gets actionable guidance and incomplete selected source exposes scan retry', () => {
@@ -281,4 +287,31 @@ test('guided review passes its saved settings snapshot through content to the so
   assert.deepEqual(JSON.parse(JSON.stringify(messages[0].payload.settings)), reviewed, 'the reviewed immutable snapshot wins over a later storage value');
   assert.deepEqual(JSON.parse(JSON.stringify(messages[1].payload.settings)), { filenamePattern: 'new-storage-value', downloadSubfolder: 'new-storage-folder', includeMeetingId: false }, 'legacy panel callers still read current saved settings');
   assert.equal(reads, 1);
+});
+
+test('duplicate review estimate uses exact shared occurrence IDs only for both sources and eligible availability', () => {
+  const inventory = buildInventory({
+    recordings: { selected: true, ok: true, assets: [
+      { id: 'r1', occurrenceId: ' exact-1 ', available: true },
+      { id: 'r2', occurrenceId: 'exact-2', available: false },
+      { id: 'r3', title: 'Similar title' },
+    ] },
+    myNotes: { selected: true, ok: true, assets: [
+      { id: 'n1', occurrenceId: 'exact-1', available: true },
+      { id: 'n2', occurrenceId: 'exact-2', available: true },
+      { id: 'n3', title: 'Similar title' },
+    ] },
+  });
+  const controls = { recordings: { checked: true }, notes: { checked: true } };
+  const fn = vm.runInNewContext(extract('function potentialDuplicateCount()', 'function renderDuplicateSummary()', 'potentialDuplicateCount'), {
+    inventory, savedDownloadSettings: { avoidDuplicateMeetings: true }, $: id => controls[id],
+  });
+  assert.equal(fn(), 1, 'trims and matches exact occurrence IDs and excludes a known unavailable Recording');
+  controls.notes.checked = false;
+  assert.equal(fn(), 0, 'the estimate is hidden unless both sources are selected');
+  controls.notes.checked = true;
+  const disabled = vm.runInNewContext(extract('function potentialDuplicateCount()', 'function renderDuplicateSummary()', 'potentialDuplicateCount'), {
+    inventory, savedDownloadSettings: { avoidDuplicateMeetings: false }, $: id => controls[id],
+  });
+  assert.equal(disabled(), 0, 'turning duplicate avoidance off hides the estimate');
 });

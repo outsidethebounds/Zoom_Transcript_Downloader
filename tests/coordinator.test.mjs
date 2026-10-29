@@ -24,6 +24,21 @@ function fixture(session = {}) {
 }
 const tick=()=>new Promise(r=>setImmediate(r));
 {
+ const f=fixture();await f.run('recoveryReady');f.local.avoidDuplicateMeetings=false;
+ let settings;
+ await new Promise(resolve=>f.chrome.runtime.onMessage.listeners[0]({type:'zoomTranscriptExtension:getSettings'},{},value=>{settings=value;resolve()}));
+ assert.equal(settings.avoidDuplicateMeetings,false,'legacy source settings retain a stored opt-out');
+ assert.equal(f.run('BASE_DEFAULTS.avoidDuplicateMeetings'),true,'new installs default deduplication on');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ f.chrome.downloads.download=async()=>77;
+ f.chrome.downloads.search=async()=>[{id:77,state:'complete',fileSize:0}];
+ let result;
+ await new Promise(resolve=>f.chrome.runtime.onMessage.listeners[0]({type:'zoomTranscriptExtension:saveTranscript',payload:{filename:'empty.txt',content:'',mimeType:'text/plain'}},{tab:{id:10}},value=>{result=value;resolve()}));
+ assert.deepEqual(JSON.parse(JSON.stringify(result)),{ok:false,error:'The transcript download was empty.'},'a zero-byte Recording file is not confirmed saved and cannot suppress its Notes fallback');
+}
+{
  const f=fixture();await f.run('recoveryReady');let resolveDownload;const cancelled=[];
  f.chrome.downloads.download=()=>new Promise(resolve=>{resolveDownload=resolve});f.chrome.downloads.cancel=async id=>cancelled.push(id);
  await assert.rejects(f.run("requestDownload({url:'data:text/plain,timeout',filename:'timeout.txt'},5)"),/browser download did not respond in time/i,'a hanging downloads.download call is bounded and actionable');
@@ -78,6 +93,58 @@ const tick=()=>new Promise(r=>setImmediate(r));
  await f.run('handleSourceWorkerResult(11,{runId:rid,source:"myNotes",saved:1,failed:0})');
  assert.equal(f.session['ztd:source-runs'].length,0);assert.equal(f.removed.length,2);
  assert.ok(f.sent.some(m=>m.type.endsWith('sourceRunFinished')&&m.payload.results.myNotes.saved===1));
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ assert.deepEqual(JSON.parse(JSON.stringify(f.run('sanitizeSavedOccurrenceIds(["saved", "not-confirmed"],1)'))),[], 'inconsistent worker IDs are rejected instead of selecting an arbitrary row');
+ assert.deepEqual(JSON.parse(JSON.stringify(f.run('sanitizeSavedOccurrenceIds(["unconfirmed"],0)'))),[], 'zero confirmed saves cannot suppress Notes');
+ f.ctx.payload={selected:['recordings','myNotes'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{avoidDuplicateMeetings:true},totals:{recordings:3,myNotes:4},guidedWorkspace:true};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
+ const run=f.session['ztd:source-runs'][0];f.ctx.rid=run.runId;
+ await f.run('handleSourceWorkerResult(10,{runId:"stale-run",source:"recordings",saved:1,savedOccurrenceIds:["stale-occurrence"]})');
+ assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:source-runs'][0].recordingSavedOccurrenceIds)),[],'stale worker results cannot contaminate the active run');
+ await f.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",saved:1,failed:1,savedOccurrenceIds:["occ-saved",17," occ-saved "]})');
+ const notePayload=f.sent.find(message=>message.type.endsWith('workerStartMyNotes')).payload;
+ assert.deepEqual(JSON.parse(JSON.stringify(notePayload.savedRecordingOccurrenceIds)),['occ-saved'],'only validated successful exact string IDs reach Notes');
+ assert.equal(notePayload.avoidDuplicateMeetings,true);
+ assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:source-runs'][0].recordingSavedOccurrenceIds)),['occ-saved'],'successful occurrence metadata survives service-worker recovery within this run');
+ const restored=fixture(structuredClone(f.session));await restored.run('recoveryReady');
+ assert.deepEqual(JSON.parse(JSON.stringify(restored.run('sourceRunsById.get('+JSON.stringify(run.runId)+').recordingSavedOccurrenceIds'))),['occ-saved'],'a service-worker restart keeps confirmed IDs only for the active run');
+ await f.run('handleSourceWorkerResult(11,{runId:rid,source:"myNotes",saved:1,skipped:0,duplicatesAvoided:2,failed:0,pending:0})');
+ const terminal=f.session['ztd:last-guided-terminal'];
+ assert.equal(terminal.results.myNotes.duplicatesAvoided,2);
+ assert.equal(terminal.results.recordings.duplicatesAvoided,0);
+ assert.equal(JSON.stringify(terminal).includes('occ-saved'),false,'opaque IDs stay out of terminal review summaries');
+ f.ctx.payload={selected:['myNotes'],originUrl:'https://us01mynotes.zoom.us/allNotes',settings:{avoidDuplicateMeetings:true}};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
+ assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:source-runs'][0].recordingSavedOccurrenceIds)),[],'a new run never inherits old occurrence IDs');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ f.ctx.payload={selected:['recordings','myNotes'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{avoidDuplicateMeetings:true}};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
+ const runId=f.session['ztd:source-runs'][0].runId;f.ctx.rid=runId;
+ await f.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",saved:0,skipped:1,failed:1,savedOccurrenceIds:["unconfirmed"]})');
+ const notePayload=f.sent.find(message=>message.type.endsWith('workerStartMyNotes')).payload;
+ assert.deepEqual(JSON.parse(JSON.stringify(notePayload.savedRecordingOccurrenceIds)),[],'unavailable and failed recordings leave Notes eligible');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ f.ctx.payload={selected:['recordings','myNotes'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{avoidDuplicateMeetings:false}};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
+ f.ctx.rid=f.session['ztd:source-runs'][0].runId;
+ await f.run('handleSourceWorkerResult(10,{runId:rid,source:"recordings",saved:1,savedOccurrenceIds:["occ-a"]})');
+ const notePayload=f.sent.find(message=>message.type.endsWith('workerStartMyNotes')).payload;
+ assert.equal(notePayload.avoidDuplicateMeetings,false);
+ assert.deepEqual(JSON.parse(JSON.stringify(notePayload.savedRecordingOccurrenceIds)),[],'explicit opt-out never suppresses Notes');
+}
+{
+ const f=fixture();await f.run('recoveryReady');
+ f.ctx.payload={selected:['myNotes'],originUrl:'https://us01mynotes.zoom.us/allNotes',settings:{}};
+ await f.run('beginSourceRun(payload,{tab:{id:1,url:payload.originUrl}},()=>{})');
+ const notePayload=f.sent.find(message=>message.type.endsWith('workerStartMyNotes')).payload;
+ assert.equal(notePayload.avoidDuplicateMeetings,true,'the setting defaults on');
+ assert.deepEqual(JSON.parse(JSON.stringify(notePayload.savedRecordingOccurrenceIds)),[],'Notes-only selection has no cross-source IDs');
 }
 {
  const first=fixture();await first.run('recoveryReady');first.ctx.payload={selected:['recordings','myNotes'],originUrl:'https://zoom.us/recording/meeting/transcript',settings:{}};
@@ -309,7 +376,7 @@ const tick=()=>new Promise(r=>setImmediate(r));
  const f=fixture();await f.run('recoveryReady');
  const run={runId:'safe-terminal',originTabId:1,originUrl:'https://zoom.us/recording/meeting/transcript',rootFolder:'Team/ZoomTranscripts-10162026',settings:{},totals:{},mode:'all',plan:createSourcePlan(['myNotes']),results:{myNotes:{saved:2,skipped:1,failed:0,pending:3,transcriptBody:'irrelevant transcript body',content:'irrelevant content',error:'private url must not persist',firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed https://files.example/private?token=private-marker'}}},currentSource:'myNotes',guided:true,finished:false,workerTabId:null};
  f.ctx.terminalRun=run;await f.run('finishSourceRun(terminalRun)');
- assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:last-guided-terminal'].results.myNotes)),{saved:2,skipped:1,failed:0,pending:3,error:true,firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed [redacted-url]'}});
+ assert.deepEqual(JSON.parse(JSON.stringify(f.session['ztd:last-guided-terminal'].results.myNotes)),{saved:2,skipped:1,duplicatesAvoided:0,failed:0,pending:3,error:true,firstError:{stage:'capture-ack',category:'capture-bridge',error:'postMessage clone failed [redacted-url]'}});
  assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private url'),false,'terminal journal omits raw worker error detail');
  assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('private-marker'),false,'terminal diagnostics redact URL query data');
  assert.equal(JSON.stringify(f.session['ztd:last-guided-terminal']).includes('irrelevant transcript body'),false,'terminal omits supplied body text');
