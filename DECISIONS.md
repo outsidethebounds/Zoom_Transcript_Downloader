@@ -1,16 +1,16 @@
 # Decisions
 
-## Current workflow decisions (2026.10.2; authoritative for current product)
+## Current workflow decisions (2026.11; authoritative for current product)
 
 - The extension-owned guided workspace is the primary user entry; the older injected panel and its Save all / Save page actions are legacy/advanced fallback.
 - Discovery scans accessible metadata from both Recording transcripts and My Notes; it does not export transcript bodies. Only fully scanned selected sources can be exported; incomplete sources must remain unselected.
 - Authentication stays on Zoom/SSO; no extension password prompt or storage. Scope is the signed-in user's accessible items, not company-wide.
-- Exact verified shared occurrence identifiers alone produce reciprocal cross-source badges. Missing association and unknown availability remain distinct; do not invent a unique count.
+- Exact verified shared occurrence identifiers alone produce reciprocal cross-source badges. Missing association and unknown availability remain distinct; do not invent a unique count. For export duplicate avoidance, the default-on setting processes Recordings first and skips matching My Notes rows only after a successful nonempty Recording save, using trimmed nonempty exact occurrence IDs within the current run. Per-item unavailable/failure leaves My Notes fallback eligible; sign-in/browser prompts can pause the batch before fallback. Turning the setting off permits both copies. There is no fuzzy title/date/content match, and unknown IDs may overlap.
 - Stop prevents subsequent exports; completed files are preserved. Do not promise automatic resume or asset-level selection.
 - Files use a dated root with source-separated folders under Downloads. My Notes means transcript files only.
-- The repository uses mocked Node tests for logic and lifecycle coverage. User-assisted Edge acceptance completed a full export for both selected sources and reconciled terminal results with saved files; workspace reload recovered terminal totals. A follow-up metadata Stop check showed completed and incomplete sources accurately, without starting an export. Chrome, Stop during active export, rate-limit/expiry behavior, and broader native-wheel behavior remain untested.
+- The repository has 99 mocked Node tests for logic and lifecycle coverage. Live Edge checks covered metadata-only scanning and workspace UI, including the default duplicate-avoidance setting and conditional Review estimate. The authorized 2026-10-16 Edge full export from both sources predates duplicate avoidance; it is not evidence of current deduplication behavior. Chrome, live duplicate-avoidance export, Stop during active export, rate-limit/expiry behavior, and broader native-wheel behavior remain untested.
 
-The numbered decisions below are preserved historical records. Where they describe the injected recordings panel, Save all, Save page, or 2026.09 behavior, they apply only to that older surface and are superseded for the primary guided workflow by the decisions above.
+The numbered decisions below are preserved historical records. Their statuses are historical as originally recorded; current workflow guidance above takes precedence wherever one conflicts. Decisions about the injected recordings panel, Save all, Save page, or 2026.09 behavior apply only to that older surface or have been superseded for the guided workflow.
 
 ---
 
@@ -37,7 +37,7 @@ The numbered decisions below are preserved historical records. Where they descri
 
 ## 3. Use Zoom’s own download buttons
 - **Session context:** This session
-- **Status:** Active
+- **Status:** Superseded for guided My Notes export; retained for the legacy UI fallback
 - **Decision:** Trigger actual Zoom downloads rather than fully scraping transcript content.
 - **Consequences:**
   - fewer auth/session problems
@@ -61,7 +61,7 @@ The numbered decisions below are preserved historical records. Where they descri
 
 ## 6. Save-all must always reset to page 1
 - **Session context:** User specified in this session
-- **Status:** Active
+- **Status:** Historical; applies only to legacy Save all
 - **Context:** Starting from page 3 and downloading from there would create partial/inaccurate runs.
 - **Decision:** `Save all` must attempt to return to page 1 before downloading.
 - **Consequences:**
@@ -70,7 +70,7 @@ The numbered decisions below are preserved historical records. Where they descri
 
 ## 9. Keep a separate current-page action alongside the batch action
 - **Session context:** UX polish pass
-- **Status:** Active
+- **Status:** Historical; applies only to the legacy panel
 - **Decision:** Expose both `Save all` for the full cross-page batch and `Save page` for the current page only.
 - **Consequences:**
   - user intent is clearer
@@ -78,7 +78,7 @@ The numbered decisions below are preserved historical records. Where they descri
 
 ## 7. Abort instead of proceeding if page-1 reset fails
 - **Session context:** User specified in this session
-- **Status:** Active
+- **Status:** Historical; applies only to legacy Save all
 - **Decision:** If page-1 reset fails, abort with a clear error instead of continuing from current page.
 - **Consequences:**
   - fewer silent partial failures

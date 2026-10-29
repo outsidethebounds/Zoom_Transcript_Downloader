@@ -1,5 +1,9 @@
 # Roadmap and research backlog
 
+## Current 2026.11 acceptance status
+
+The guided workflow and default-on, same-run exact-ID duplicate avoidance are implemented and covered by mocked tests. Live Edge metadata/UI checks verified the setting and conditional Review estimate. A live export with duplicate avoidance enabled has not yet been accepted; the 2026-10-16 full export predates that feature. Keep this acceptance item open until verified. Duplicate avoidance does not use prior-run state or infer matches from titles, dates, or transcript content; missing IDs may overlap.
+
 ## Possible future: authenticated-context, tabless export (NOT implemented)
 
 Investigate whether Recording Transcripts and My Notes can both be exported without extension-created worker tabs, using authenticated extension context. This is an investigation item only; there is no feasibility verdict, estimate, implementation, or supported tabless path. Current downloads still depend on Zoom source-page workers.
